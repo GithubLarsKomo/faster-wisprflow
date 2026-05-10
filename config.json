@@ -1,0 +1,17 @@
+{
+  "whisper_url": "http://10.4.190.16:8008/transcribe",
+  "language": "de",
+  "response_format": "text",
+  "sample_rate": 16000,
+  "channels": 1,
+  "hotkey_keys": [
+    "ctrl",
+    "linke windows",
+    "space"
+  ],
+  "restore_clipboard": true,
+  "audio_filename": "recording.wav",
+  "input_device": 10,
+  "start_with_windows": true,
+  "auto_elevate": true
+}

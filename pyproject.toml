@@ -1,0 +1,19 @@
+[project]
+name = "faster-wisprflow"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "isort>=8.0.1",
+    "keyboard>=0.13.5",
+    "numpy>=2.4.4",
+    "pillow>=12.2.0",
+    "pyinstaller>=6.20.0",
+    "pyperclip>=1.11.0",
+    "pystray>=0.19.5",
+    "requests>=2.33.1",
+    "ruff>=0.15.12",
+    "sounddevice>=0.5.5",
+    "soundfile>=0.13.1",
+]
