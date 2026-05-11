@@ -1,5 +1,5 @@
 @echo off
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-pyinstaller --onefile --noconsole --name WhisperDictate app.py
+uv run pyinstaller --onefile --noconsole --name EuroWisprFlow --add-data "tray_icon.png;." --icon tray_icon.ico app.py
 pause
