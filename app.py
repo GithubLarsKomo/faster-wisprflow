@@ -839,7 +839,7 @@ class SettingsWindow:
             return
         vwin = tk.Toplevel(self.win)
         vwin.title("Vokabular verwalten")
-        vwin.geometry("480x380")
+        vwin.geometry("480x430")
         vwin.resizable(True, True)
         vwin.attributes("-topmost", True)
 
@@ -866,8 +866,70 @@ class SettingsWindow:
 
         _refresh()
 
+        # ── Inline-Edit-Bereich (row=1, zunächst ausgeblendet) ─────────────
+        edit_frm = ttk.LabelFrame(frm, text=" Bearbeiten ", padding=(8, 4))
+        ef = ttk.Frame(edit_frm)
+        ef.pack(fill="x")
+        ttk.Label(ef, text="Erkannt als:").grid(
+            row=0, column=0, sticky="e", padx=(0, 6)
+        )
+        edit_orig_var = tk.StringVar()
+        ttk.Entry(ef, textvariable=edit_orig_var, width=18).grid(
+            row=0, column=1, sticky="ew", padx=(0, 12)
+        )
+        ttk.Label(ef, text="Ersatz:").grid(row=0, column=2, sticky="e", padx=(0, 6))
+        edit_corr_var = tk.StringVar()
+        ttk.Entry(ef, textvariable=edit_corr_var, width=18).grid(
+            row=0, column=3, sticky="ew"
+        )
+        ef.columnconfigure(1, weight=1)
+        ef.columnconfigure(3, weight=1)
+        # edit_frm starts hidden — gridded only when entering edit mode
+
+        # ── Button-Leiste (row=2) ──────────────────────────────────────────
         btns = ttk.Frame(frm)
-        btns.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+        btns.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
+
+        _editing_orig: list = [None]  # key being edited (mutable cell)
+
+        def _enter_edit_mode():
+            sel = tree.selection()
+            if not sel:
+                return
+            orig, corr = tree.item(sel[0])["values"]
+            _editing_orig[0] = str(orig)
+            edit_orig_var.set(str(orig))
+            edit_corr_var.set(str(corr))
+            # show inline edit frame
+            edit_frm.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
+            # swap buttons: hide normal set, show save/cancel
+            btn_add.pack_forget()
+            btn_edit.pack_forget()
+            btn_remove.pack_forget()
+            btn_close.pack_forget()
+            btn_save.pack(side="left", padx=(0, 4))
+            btn_cancel.pack(side="left", padx=4)
+
+        def _save_edit():
+            o = edit_orig_var.get().strip()
+            c = edit_corr_var.get().strip()
+            if o and c:
+                old_key = _editing_orig[0]
+                if old_key and old_key.lower() != o.lower():
+                    self.app.vocab.remove(old_key)
+                self.app.vocab.add(o, c)
+                _refresh()
+            _exit_edit_mode()
+
+        def _exit_edit_mode():
+            _editing_orig[0] = None
+            edit_frm.grid_remove()
+            btn_save.pack_forget()
+            btn_cancel.pack_forget()
+            btn_add.pack(side="left", padx=(0, 4))
+            btn_edit.pack(side="left", padx=4)
+            btn_remove.pack(side="left", padx=4)
+            btn_close.pack(side="left", padx=4)
 
         def _add():
             dlg = tk.Toplevel(vwin)
@@ -913,11 +975,19 @@ class SettingsWindow:
             self.app.vocab.remove(str(orig))
             _refresh()
 
-        ttk.Button(btns, text="Hinzufügen", command=_add).pack(side="left", padx=(0, 4))
-        ttk.Button(btns, text="Entfernen", command=_remove).pack(side="left", padx=4)
-        ttk.Button(btns, text="Schließen", command=vwin.destroy).pack(
-            side="left", padx=4
-        )
+        # Normal-Modus-Buttons
+        btn_add = ttk.Button(btns, text="Hinzufügen", command=_add)
+        btn_add.pack(side="left", padx=(0, 4))
+        btn_edit = ttk.Button(btns, text="Editieren", command=_enter_edit_mode)
+        btn_edit.pack(side="left", padx=4)
+        btn_remove = ttk.Button(btns, text="Entfernen", command=_remove)
+        btn_remove.pack(side="left", padx=4)
+        btn_close = ttk.Button(btns, text="Schließen", command=vwin.destroy)
+        btn_close.pack(side="left", padx=4)
+
+        # Edit-Modus-Buttons (zunächst unsichtbar)
+        btn_save = ttk.Button(btns, text="Speichern", command=_save_edit)
+        btn_cancel = ttk.Button(btns, text="Abbrechen", command=_exit_edit_mode)
 
     def test_microphone(self):
         try:
