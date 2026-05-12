@@ -1,10 +1,13 @@
 {
-  "whisper_url": "http://10.4.190.16:8009/transcribe",
+  "whisper_url": "http://10.4.190.16",
+  "port": 8009,
+  "whisper_endpoint": "transcribe",
+  "health_endpoint": "health",
   "language": "de",
   "response_format": "text",
   "sample_rate": 16000,
   "channels": 1,
-  "input_device": 10,
+  "input_device": null,
   "hotkey_keys": [
     "ctrl",
     "linke windows"
