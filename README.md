@@ -6,10 +6,23 @@ Basiert auf einem lokalen [Faster-Whisper](https://github.com/SYSTRAN/faster-whi
 
 ---
 
+## Features
+
+- **Hotkey-Diktat** — Hotkey halten = aufnehmen, loslassen = transkribieren und einfügen
+- **Animiertes Mic-Level-Popup** — Pill-förmiges Popup mit Pegelbalken während der Aufnahme, Punkte-Animation während der Transkription
+- **Vokabular-Lernfunktion** — Korrekturen nach dem Einfügen werden automatisch erkannt und in `vocabulary.json` gespeichert; beim nächsten Diktat werden bekannte Wörter automatisch ersetzt
+- **Multi-Monitor-Unterstützung** — Overlay und Popup erscheinen auf dem mittleren Monitor (bei ungerader Anzahl) bzw. rechts der Mitte (bei gerader Anzahl)
+- **Toast-Benachrichtigungen** — Kurzes Overlay-Feedback z. B. „📚 1 Korrektur gespeichert"
+- **Vokabular-Verwaltungsfenster** — Einträge ansehen, hinzufügen und entfernen über eine Treeview-Oberfläche in den Einstellungen
+- **System-Tray-Integration** — Läuft im Hintergrund, Rechtsklick für Menü
+- **Admin-Auto-Elevation** — Optional beim Start automatisch Administratorrechte anfordern
+
+---
+
 ## Voraussetzungen
 
 - Windows 10/11
-- Laufender Whisper-HTTP-Server (z. B. `faster-whisper-server`)
+- Laufender Whisper-HTTP-Server (z. B. [`faster-whisper-server`](https://github.com/fedirz/faster-whisper-server))
 - Python 3.12+ mit [uv](https://github.com/astral-sh/uv) (nur für Entwicklung)
 
 ---
@@ -44,12 +57,23 @@ Basiert auf einem lokalen [Faster-Whisper](https://github.com/SYSTRAN/faster-whi
 
 | Aktion | Beschreibung |
 |---|---|
-| Hotkey **halten** | Aufnahme starten |
+| Hotkey **halten** | Aufnahme starten (Mic-Level-Popup erscheint) |
 | Hotkey **loslassen** | Aufnahme stoppen, Transkription starten, Text einfügen |
+| Nach dem Einfügen ein Wort **korrigieren** | Korrektur wird nach ~3 s Pause erkannt und gespeichert |
 | Tray-Icon Rechtsklick → **Einstellungen** | Einstellungsfenster öffnen |
 | Tray-Icon Rechtsklick → **Beenden** | App beenden |
 
-Das Overlay erscheint unten mittig auf dem Bildschirm und zeigt den aktuellen Status an.
+Das Overlay erscheint unten mittig auf dem Ziel-Monitor und zeigt den aktuellen Status an.
+
+---
+
+## Vokabular-Lernfunktion
+
+Nach jedem Einfügevorgang beobachtet EuroWisprFlow für bis zu 20 Sekunden die Tastatureingabe.
+Sobald 3 Sekunden Pause erkannt werden, vergleicht die App den eingefügten Text mit dem aktuellen Inhalt per Clipboard-Snapshot.
+Einzelne Wort-Ersetzungen werden automatisch in `vocabulary.json` (neben `config.json`) gespeichert und bei der nächsten Transkription angewendet.
+
+Das Vokabular kann unter **Einstellungen → Vokabular verwalten** eingesehen und bearbeitet werden.
 
 ---
 
@@ -58,6 +82,7 @@ Das Overlay erscheint unten mittig auf dem Bildschirm und zeigt den aktuellen St
 - Whisper-URL, Sprache, Mikrofon, Sample Rate, Kanäle, Hotkey konfigurieren
 - **Mikrofon testen** — 3-Sekunden-Aufnahme mit Pegelanzeige
 - **Whisper testen** — 3-Sekunden-Aufnahme mit sofortiger Transkription
+- **Vokabular verwalten** — gespeicherte Korrekturen ansehen, hinzufügen und entfernen
 
 ---
 
