@@ -28,6 +28,31 @@ else:
 
 VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
 
+_DEFAULT_LLM_PROMPT = "\n".join([
+    "Du bist ein lokaler Diktat-Cleanup-Assistent.",
+    "",
+    "Aufgabe:",
+    "Wandle den folgenden diktierten Rohtext in klaren, sendefähigen Text um.",
+    "",
+    "Regeln:",
+    "- Entferne Füllwörter wie äh, ähm, also, genau, wenn sie keine Bedeutung tragen.",
+    '- Löse Selbstkorrekturen auf: "morgen um vier, nein drei" => "morgen um drei".',
+    "- Erhalte fachliche Begriffe.",
+    "- Keine Fakten ergänzen.",
+    "- Keine Inhalte erfinden.",
+    "- Schreibe in der Sprache des Eingabetextes.",
+    "- Gib nur den finalen Text aus.",
+    "",
+    "Persönliches Wörterbuch:",
+    "{{dictionary}}",
+    "",
+    "Snippets:",
+    "{{snippets}}",
+    "",
+    "Rohtext:",
+    "{{raw_text}}",
+])
+
 
 def _resource(filename: str) -> Path:
     """Resolve path to a bundled resource (works in PyInstaller onefile and dev)."""
@@ -52,6 +77,11 @@ DEFAULT_CONFIG = {
     "audio_filename": "recording.wav",
     "auto_elevate": True,
     "start_with_windows": True,
+    "llm_correction_enabled": False,
+    "llm_correction_url": "http://localhost",
+    "llm_correction_port": 11434,
+    "llm_correction_model": "llama3",
+    "llm_correction_system_prompt": _DEFAULT_LLM_PROMPT,
 }
 
 
@@ -158,6 +188,13 @@ class Config:
         self.hotkey_keys = data["hotkey_keys"]
         self.restore_clipboard = bool(data["restore_clipboard"])
         self.audio_filename = data["audio_filename"]
+        self.llm_correction_enabled = bool(data.get("llm_correction_enabled", False))
+        self.llm_correction_url = data.get("llm_correction_url", "http://localhost")
+        self.llm_correction_port = data.get("llm_correction_port", 11434)
+        self.llm_correction_model = data.get("llm_correction_model", "llama3")
+        self.llm_correction_system_prompt = data.get(
+            "llm_correction_system_prompt", _DEFAULT_LLM_PROMPT
+        )
 
 
 class Overlay:
@@ -286,6 +323,46 @@ class WhisperClient:
             return response.text.strip()
 
         return response.json().get("text", "").strip()
+
+
+class LLMCorrector:
+    """Sends transcribed text to a local LLM (Ollama /api/generate) for cleanup."""
+
+    def __init__(self, config: Config) -> None:
+        self.config = config
+
+    def correct(self, text: str, vocab: "VocabularyManager") -> str:
+        if not self.config.llm_correction_enabled or not text.strip():
+            return text
+        try:
+            base = _build_base_url(
+                self.config.llm_correction_url,
+                self.config.llm_correction_port,
+            )
+            url = base.rstrip("/") + "/api/generate"
+            corr = vocab.all()
+            dict_str = (
+                "\n".join(f"  {k} \u2192 {v}" for k, v in sorted(corr.items()))
+                if corr
+                else "(leer)"
+            )
+            prompt = (
+                self.config.llm_correction_system_prompt
+                .replace("{{dictionary}}", dict_str)
+                .replace("{{snippets}}", "(keine)")
+                .replace("{{raw_text}}", text)
+            )
+            payload = {
+                "model": self.config.llm_correction_model,
+                "prompt": prompt,
+                "stream": False,
+            }
+            resp = requests.post(url, json=payload, timeout=30)
+            resp.raise_for_status()
+            result = resp.json().get("response", "").strip()
+            return result if result else text
+        except Exception:
+            return text
 
 
 class TextInserter:
@@ -519,8 +596,8 @@ class _MicLevelPopup:
     _BW = 3  # bar width (px)
     _BG = 2  # gap between bars (px)
     _MH = 15  # max bar height (px)
-    _PX = 7  # horizontal padding
-    _PY = 5  # vertical padding
+    _PX = 10  # horizontal padding
+    _PY = 6  # vertical padding
     _D_R = 2  # dot radius (px)
     _D_GAP = 3  # gap between dots (px)
     _D_PAD = 5  # gap between bars and dots (px)
@@ -643,7 +720,7 @@ class SettingsWindow:
 
         self.win = tk.Toplevel(self.app.overlay.root)
         self.win.title("EuroWisprFlow Einstellungen")
-        self.win.geometry("580x560")
+        self.win.geometry("580x680")
         self.win.resizable(False, False)
         self.win.attributes("-topmost", True)
 
@@ -664,6 +741,11 @@ class SettingsWindow:
         self.hotkey_var = tk.StringVar(value="+".join(cfg["hotkey_keys"]))
         self.restore_var = tk.BooleanVar(value=cfg["restore_clipboard"])
         self.elevate_var = tk.BooleanVar(value=cfg.get("auto_elevate", False))
+        self.llm_enabled_var = tk.BooleanVar(value=cfg.get("llm_correction_enabled", False))
+        self.llm_url_var = tk.StringVar(value=cfg.get("llm_correction_url", ""))
+        llm_port_val = cfg.get("llm_correction_port", None)
+        self.llm_port_var = tk.StringVar(value=str(llm_port_val) if llm_port_val else "")
+        self.llm_model_var = tk.StringVar(value=cfg.get("llm_correction_model", ""))
 
         devices = []
         selected_index = 0
@@ -751,6 +833,26 @@ class SettingsWindow:
             variable=self.elevate_var,
         ).grid(row=2, column=0, columnspan=2, sticky="w", pady=3)
 
+        # ── LLM-Korrektur ─────────────────────────────────────
+        llm = ttk.LabelFrame(frm, text=" LLM-Korrektur (Ollama) ", padding=(10, 6))
+        llm.pack(fill="x", pady=(0, 8))
+        llm.columnconfigure(1, weight=1)
+
+        ttk.Checkbutton(
+            llm, text="LLM-Korrektur aktivieren", variable=self.llm_enabled_var
+        ).grid(row=0, column=0, columnspan=2, sticky="w", pady=3)
+
+        ttk.Label(llm, text="URL").grid(row=1, column=0, **LBL)
+        ttk.Entry(llm, textvariable=self.llm_url_var).grid(row=1, column=1, **INP)
+
+        ttk.Label(llm, text="Port").grid(row=2, column=0, **LBL)
+        ttk.Entry(llm, textvariable=self.llm_port_var, width=8).grid(
+            row=2, column=1, sticky="w", pady=3
+        )
+
+        ttk.Label(llm, text="Modell").grid(row=3, column=0, **LBL)
+        ttk.Entry(llm, textvariable=self.llm_model_var).grid(row=3, column=1, **INP)
+
         # ── Buttons ───────────────────────────────────────────
         btns = ttk.Frame(frm)
         btns.pack(fill="x", pady=(4, 0))
@@ -802,6 +904,15 @@ class SettingsWindow:
         ]
         cfg["restore_clipboard"] = bool(self.restore_var.get())
         cfg["auto_elevate"] = bool(self.elevate_var.get())
+        cfg["llm_correction_enabled"] = bool(self.llm_enabled_var.get())
+        cfg["llm_correction_url"] = self.llm_url_var.get().strip()
+        llm_port_str = self.llm_port_var.get().strip()
+        cfg["llm_correction_port"] = (
+            int(llm_port_str)
+            if llm_port_str.isdigit() and int(llm_port_str) > 0
+            else None
+        )
+        cfg["llm_correction_model"] = self.llm_model_var.get().strip()
 
         save_config(cfg)
         self.app.reload_config()
@@ -831,6 +942,11 @@ class SettingsWindow:
         self.restore_var.set(DEFAULT_CONFIG["restore_clipboard"])
         self.elevate_var.set(DEFAULT_CONFIG["auto_elevate"])
         self.device_var.set("")
+        self.llm_enabled_var.set(DEFAULT_CONFIG.get("llm_correction_enabled", False))
+        self.llm_url_var.set(DEFAULT_CONFIG.get("llm_correction_url", ""))
+        llm_port_def = DEFAULT_CONFIG.get("llm_correction_port", None)
+        self.llm_port_var.set(str(llm_port_def) if llm_port_def else "")
+        self.llm_model_var.set(DEFAULT_CONFIG.get("llm_correction_model", ""))
 
         messagebox.showinfo("Werkseinstellungen", "Einstellungen wurden zurückgesetzt.")
 
@@ -1209,6 +1325,7 @@ class App:
         self.client = WhisperClient(self.config)
         self.inserter = TextInserter(self.config)
         self.vocab = VocabularyManager()
+        self.llm = LLMCorrector(self.config)
         self.settings = SettingsWindow(self)
         self.tray = Tray(self)
 
@@ -1224,6 +1341,7 @@ class App:
         self.recorder = Recorder(self.config)
         self.client = WhisperClient(self.config)
         self.inserter = TextInserter(self.config)
+        self.llm = LLMCorrector(self.config)
 
     def hotkey_pressed(self):
         _ALIASES = {"left windows": "linke windows", "linke windows": "left windows"}
@@ -1341,6 +1459,7 @@ class App:
 
             if text:
                 text = self.vocab.apply(text)
+                text = self.llm.correct(text, self.vocab)
                 self.inserter.insert_text(text)
                 self._correction_tracker = CorrectionTracker(self.vocab)
                 self._correction_tracker.start(
@@ -1393,5 +1512,17 @@ class App:
 
 
 if __name__ == "__main__":
+    _mutex = ctypes.windll.kernel32.CreateMutexW(
+        None, True, "EuroWisprFlow_SingleInstance"
+    )
+    if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        import tkinter as _tk
+        import tkinter.messagebox as _mb
+
+        _r = _tk.Tk()
+        _r.withdraw()
+        _mb.showwarning("EuroWisprFlow", "EuroWisprFlow läuft bereits.")
+        _r.destroy()
+        sys.exit(0)
     print("Starte EuroWisprFlow…")
     App().run()

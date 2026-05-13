@@ -15,5 +15,10 @@
   "restore_clipboard": true,
   "audio_filename": "recording.wav",
   "auto_elevate": true,
-  "start_with_windows": true
+  "start_with_windows": true,
+  "llm_correction_enabled": true,
+  "llm_correction_url": "http://10.4.190.16",
+  "llm_correction_port": 11343,
+  "llm_correction_model": "gemma4:e4b",
+  "llm_correction_system_prompt": "Du bist ein lokaler Diktat-Cleanup-Assistent.\n\nAufgabe:\nWandle den folgenden diktierten Rohtext in klaren, sendefähigen Text um.\n\nRegeln:\n- Entferne Füllwörter wie äh, ähm, also, genau, wenn sie keine Bedeutung tragen.\n- Löse Selbstkorrekturen auf: \"morgen um vier, nein drei\" => \"morgen um drei\".\n- Erhalte fachliche Begriffe.\n- Keine Fakten ergänzen.\n- Keine Inhalte erfinden.\n- Schreibe in der Sprache des Eingabetextes.\n- Gib nur den finalen Text aus.\n\nPersönliches Wörterbuch:\n{{dictionary}}\n\nSnippets:\n{{snippets}}\n\nRohtext:\n{{raw_text}}"
 }
