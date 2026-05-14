@@ -28,30 +28,36 @@ else:
 
 VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
 
-_DEFAULT_LLM_PROMPT = "\n".join([
-    "Du bist ein lokaler Diktat-Cleanup-Assistent.",
-    "",
-    "Aufgabe:",
-    "Wandle den folgenden diktierten Rohtext in klaren, sendefähigen Text um.",
-    "",
-    "Regeln:",
-    "- Entferne Füllwörter wie äh, ähm, also, genau, wenn sie keine Bedeutung tragen.",
-    '- Löse Selbstkorrekturen auf: "morgen um vier, nein drei" => "morgen um drei".',
-    "- Erhalte fachliche Begriffe.",
-    "- Keine Fakten ergänzen.",
-    "- Keine Inhalte erfinden.",
-    "- Schreibe in der Sprache des Eingabetextes.",
-    "- Gib nur den finalen Text aus.",
-    "",
-    "Persönliches Wörterbuch:",
-    "{{dictionary}}",
-    "",
-    "Snippets:",
-    "{{snippets}}",
-    "",
-    "Rohtext:",
-    "{{raw_text}}",
-])
+_DEFAULT_LLM_PROMPT = "\n".join(
+    [
+        "Du bist ein extrem schneller Speech-to-Text Cleanup-Prozessor.",
+        "",
+        "AUFGABE:",
+        "Korrigiere ausschließlich:",
+        "",
+        "Orthographie",
+        "Zeichensetzung",
+        "Groß-/Kleinschreibung",
+        "offensichtliche Speech-to-Text Fehler",
+        "deutsche Umlaute",
+        "Satzstruktur bei Diktatfragmenten",
+        "",
+        "REGELN:",
+        "",
+        "KEINE neuen Informationen hinzufügen",
+        "Bedeutung NICHT verändern",
+        "KEINE Zusammenfassung",
+        "KEINE Umformulierungen außer minimal notwendig",
+        "Fachbegriffe erhalten",
+        "Sprache automatisch erkennen (Deutsch/English)",
+        "Ausgabe nur als finaler Text",
+        "Kein Markdown",
+        "Keine Erklärungen",
+        "",
+        "",
+        "{{raw_text}}",
+    ]
+)
 
 
 def _resource(filename: str) -> Path:
@@ -65,6 +71,7 @@ def _resource(filename: str) -> Path:
 DEFAULT_CONFIG = {
     "whisper_url": "http://10.4.190.16",
     "port": 8009,
+    "whisper_token": "",
     "whisper_endpoint": "transcribe",
     "health_endpoint": "health",
     "language": "de",
@@ -77,18 +84,24 @@ DEFAULT_CONFIG = {
     "audio_filename": "recording.wav",
     "auto_elevate": True,
     "start_with_windows": True,
-    "llm_correction_enabled": False,
-    "llm_correction_url": "http://localhost",
-    "llm_correction_port": 11434,
-    "llm_correction_model": "llama3",
-    "llm_correction_system_prompt": _DEFAULT_LLM_PROMPT,
+    "correction_enabled": True,
+    "correction_url": "http://10.4.190.16",
+    "correction_port": 11434,
+    "correction_token": "",
+    "correction_model": "hf.co/unsloth/Qwen3-4B-GGUF:Q4_K_XL",
+    "temperature": 0,
+    "top_p": 1,
+    "num_predict": 220,
+    "num_ctx": 1024,
+    "repeat_penalty": 1.0,
+    "system_prompt": _DEFAULT_LLM_PROMPT,
 }
 
 
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
-    except Exception:
+    except BaseException:
         return False
 
 
@@ -169,6 +182,14 @@ def _target_monitor() -> tuple:
     return (0, 0, w, h)
 
 
+def _center_on_target(win: tk.Toplevel, w: int, h: int) -> None:
+    """Position win (w×h) centered on the target monitor."""
+    ml, mt, mr, mb = _target_monitor()
+    x = ml + (mr - ml - w) // 2
+    y = mt + (mb - mt - h) // 2
+    win.geometry(f"{w}x{h}+{x}+{y}")
+
+
 class Config:
     def __init__(self):
         self.reload()
@@ -178,6 +199,7 @@ class Config:
         self.raw = data
         self.whisper_url = data["whisper_url"]
         self.port = data.get("port", None)
+        self.whisper_token = data.get("whisper_token", "")
         self.whisper_endpoint = data.get("whisper_endpoint", "/transcribe")
         self.health_endpoint = data.get("health_endpoint", "/health")
         self.language = data["language"]
@@ -188,13 +210,19 @@ class Config:
         self.hotkey_keys = data["hotkey_keys"]
         self.restore_clipboard = bool(data["restore_clipboard"])
         self.audio_filename = data["audio_filename"]
-        self.llm_correction_enabled = bool(data.get("llm_correction_enabled", False))
-        self.llm_correction_url = data.get("llm_correction_url", "http://localhost")
-        self.llm_correction_port = data.get("llm_correction_port", 11434)
-        self.llm_correction_model = data.get("llm_correction_model", "llama3")
-        self.llm_correction_system_prompt = data.get(
-            "llm_correction_system_prompt", _DEFAULT_LLM_PROMPT
+        self.correction_enabled = bool(data.get("correction_enabled", True))
+        self.correction_url = data.get("correction_url", "http://10.4.190.16")
+        self.correction_port = data.get("correction_port", 11434)
+        self.correction_token = data.get("correction_token", "")
+        self.correction_model = data.get(
+            "correction_model", "hf.co/unsloth/Qwen3-4B-GGUF:Q4_K_XL"
         )
+        self.temperature = data.get("temperature", 0)
+        self.top_p = data.get("top_p", 1)
+        self.num_predict = data.get("num_predict", 220)
+        self.num_ctx = data.get("num_ctx", 1024)
+        self.repeat_penalty = data.get("repeat_penalty", 1.0)
+        self.system_prompt = data.get("system_prompt", _DEFAULT_LLM_PROMPT)
 
 
 class Overlay:
@@ -261,10 +289,13 @@ class Recorder:
         self.last_rms: float = 0.0
 
     def _callback(self, indata, frames, time_info, status):
-        with self.lock:
-            if self.recording:
-                self.frames.append(indata.copy())
-                self.last_rms = float(np.sqrt(np.mean(indata**2)))
+        try:
+            with self.lock:
+                if self.recording:
+                    self.frames.append(indata.copy())
+                    self.last_rms = float(np.sqrt(np.mean(indata**2)))
+        except BaseException:
+            pass
 
     def start(self):
         with self.lock:
@@ -307,6 +338,9 @@ class WhisperClient:
     def transcribe(self, audio_path):
         with open(audio_path, "rb") as f:
             base = _build_base_url(self.config.whisper_url, self.config.port)
+            headers = {}
+            if self.config.whisper_token:
+                headers["Authorization"] = f"Bearer {self.config.whisper_token}"
             response = requests.post(
                 base + "/" + self.config.whisper_endpoint.lstrip("/"),
                 files={"file": (audio_path.name, f, "audio/wav")},
@@ -315,6 +349,7 @@ class WhisperClient:
                     "response_format": self.config.response_format,
                 },
                 timeout=600,
+                headers=headers,
             )
 
         response.raise_for_status()
@@ -332,32 +367,37 @@ class LLMCorrector:
         self.config = config
 
     def correct(self, text: str, vocab: "VocabularyManager") -> str:
-        if not self.config.llm_correction_enabled or not text.strip():
+        if not self.config.correction_enabled or not text.strip():
             return text
         try:
             base = _build_base_url(
-                self.config.llm_correction_url,
-                self.config.llm_correction_port,
+                self.config.correction_url,
+                self.config.correction_port,
             )
             url = base.rstrip("/") + "/api/generate"
+            headers = {}
+            if self.config.correction_token:
+                headers["Authorization"] = f"Bearer {self.config.correction_token}"
             corr = vocab.all()
             dict_str = (
                 "\n".join(f"  {k} \u2192 {v}" for k, v in sorted(corr.items()))
                 if corr
                 else "(leer)"
             )
-            prompt = (
-                self.config.llm_correction_system_prompt
-                .replace("{{dictionary}}", dict_str)
-                .replace("{{snippets}}", "(keine)")
-                .replace("{{raw_text}}", text)
-            )
+            prompt = self.config.correction_system_prompt.replace(
+                "{{dictionary}}", dict_str
+            ).replace("{{raw_text}}", text)
             payload = {
-                "model": self.config.llm_correction_model,
+                "model": self.config.correction_model,
                 "prompt": prompt,
+                "temperature": self.config.correction_temperature,
+                "top_p": self.config.correction_top_p,
+                "num_predict": self.config.num_predict,
+                "num_ctx": self.config.num_ctx,
+                "repeat_penalty": self.config.repeat_penalty,
                 "stream": False,
             }
-            resp = requests.post(url, json=payload, timeout=30)
+            resp = requests.post(url, json=payload, timeout=30, headers=headers)
             resp.raise_for_status()
             result = resp.json().get("response", "").strip()
             return result if result else text
@@ -601,20 +641,29 @@ class _MicLevelPopup:
     _D_R = 2  # dot radius (px)
     _D_GAP = 3  # gap between dots (px)
     _D_PAD = 5  # gap between bars and dots (px)
+    _TRANS = "#fefefe"  # transparent corner sentinel
 
-    def __init__(self, parent: tk.Misc) -> None:
+    def __init__(self, parent: tk.Misc, llm_enabled: bool = False) -> None:
+        pill_bg = "#99cc99" if llm_enabled else "#ffffff"
+        fg = "#006600"
+        dot_hidden = pill_bg
+
         bars_w = self._N * (self._BW + self._BG) - self._BG
         dots_w = 3 * (self._D_R * 2) + 2 * self._D_GAP
         self._bars_only_w = self._PX + bars_w + self._PX
         self._full_w = self._PX + bars_w + self._D_PAD + dots_w + self._PX
         h = self._MH + self._PY * 2
         self._h = h
+        self._pill_bg = pill_bg
+        self._fg = fg
+        self._dot_hidden = dot_hidden
 
         self.top = tk.Toplevel(parent)
         self.top.overrideredirect(True)
         self.top.attributes("-topmost", True)
         self.top.attributes("-alpha", 0.93)
-        self.top.configure(bg="#ffffff")
+        self.top.configure(bg=self._TRANS)
+        self.top.attributes("-transparentcolor", self._TRANS)
 
         ml, mt, mr, mb = _target_monitor()
         self._mon = (ml, mt, mr, mb)
@@ -622,9 +671,12 @@ class _MicLevelPopup:
         self.top.geometry(f"{w}x{h}+{ml + (mr - ml - w) // 2}+{mb - h - 70}")
 
         self._cv = tk.Canvas(
-            self.top, width=self._full_w, height=h, bg="#ffffff", highlightthickness=0
+            self.top, width=self._full_w, height=h, bg=self._TRANS, highlightthickness=0
         )
         self._cv.pack()
+
+        # pill background (drawn first so bars/dots sit on top)
+        self._pill = self._cv.create_rectangle(0, 0, w, h, fill=pill_bg, outline="")
 
         cy = h // 2
         self._cy = cy
@@ -632,7 +684,7 @@ class _MicLevelPopup:
         for i in range(self._N):
             x = self._PX + i * (self._BW + self._BG)
             bar = self._cv.create_rectangle(
-                x, cy - 1, x + self._BW, cy + 1, fill="#000000", outline=""
+                x, cy - 1, x + self._BW, cy + 1, fill=fg, outline=""
             )
             self._bars.append(bar)
 
@@ -646,7 +698,7 @@ class _MicLevelPopup:
                 cy - self._D_R,
                 dx + self._D_R * 2,
                 cy + self._D_R,
-                fill="#ffffff",
+                fill=dot_hidden,
                 outline="",
             )
             self._dots.append(dot)
@@ -677,7 +729,7 @@ class _MicLevelPopup:
         if not self.top.winfo_exists():
             return
         for i, dot in enumerate(self._dots):
-            self._cv.itemconfig(dot, fill="#000000" if i < n else "#ffffff")
+            self._cv.itemconfig(dot, fill=self._fg if i < n else self._dot_hidden)
 
     def expand_for_dots(self) -> None:
         """Widen the window to reveal the dots area."""
@@ -688,6 +740,8 @@ class _MicLevelPopup:
         x = ml + (mr - ml - w) // 2
         y = mb - self._h - 70
         self.top.geometry(f"{w}x{self._h}+{x}+{y}")
+        self._cv.itemconfig(self._pill, fill=self._pill_bg)
+        self._cv.coords(self._pill, 0, 0, w, self._h)
         self.top.after(10, lambda: self._apply_rounded_region(self._full_w))
 
     def _tick(self) -> None:
@@ -699,6 +753,114 @@ class _MicLevelPopup:
             x0, _, x1, _ = self._cv.coords(bar)
             self._cv.coords(bar, x0, self._cy - bh // 2, x1, self._cy + bh // 2)
         self.top.after(50, self._tick)
+
+    def close(self) -> None:
+        self._alive = False
+        if self.top.winfo_exists():
+            self.top.destroy()
+
+
+class _LLMPopup:
+    """Small pill-shaped popup showing 'Anfrage gesendet' with animated dots."""
+
+    _PX = 10
+    _PY = 6
+    _D_R = 3
+    _D_GAP = 5
+    _FONT = ("Segoe UI", 9)
+    _TRANS = "#fefefe"
+
+    def __init__(self, parent: tk.Misc) -> None:
+        pill_bg = "#99cc99"  # LLM popup always shown when LLM is in use
+        fg = "#006600"
+        dot_hidden = pill_bg
+
+        self._fg = fg
+        self._dot_hidden = dot_hidden
+
+        self.top = tk.Toplevel(parent)
+        self.top.overrideredirect(True)
+        self.top.attributes("-topmost", True)
+        self.top.attributes("-alpha", 0.93)
+        self.top.configure(bg=self._TRANS)
+        self.top.attributes("-transparentcolor", self._TRANS)
+
+        # Measure text width via a temporary label
+        tmp = tk.Label(self.top, text="Anfrage gesendet", font=self._FONT)
+        tmp.update_idletasks()
+        tw = tmp.winfo_reqwidth()
+        tmp.destroy()
+
+        dots_w = 3 * (self._D_R * 2) + 2 * self._D_GAP
+        w = self._PX + tw + self._D_GAP * 2 + dots_w + self._PX
+        h = max(24, self._D_R * 2 + self._PY * 2 + 4)
+        self._w = w
+        self._h = h
+
+        ml, mt, mr, mb = _target_monitor()
+        x = ml + (mr - ml - w) // 2
+        y = mb - h - 70
+        self.top.geometry(f"{w}x{h}+{x}+{y}")
+
+        self._cv = tk.Canvas(
+            self.top, width=w, height=h, bg=self._TRANS, highlightthickness=0
+        )
+        self._cv.pack()
+
+        # pill background
+        self._cv.create_rectangle(0, 0, w, h, fill=pill_bg, outline="")
+
+        cy = h // 2
+        self._cv.create_text(
+            self._PX,
+            cy,
+            anchor="w",
+            text="Anfrage gesendet",
+            font=self._FONT,
+            fill=fg,
+        )
+
+        dots_x0 = self._PX + tw + self._D_GAP * 2
+        self._dots: list = []
+        for i in range(3):
+            dx = dots_x0 + i * (self._D_R * 2 + self._D_GAP)
+            dot = self._cv.create_oval(
+                dx,
+                cy - self._D_R,
+                dx + self._D_R * 2,
+                cy + self._D_R,
+                fill=dot_hidden,
+                outline="",
+            )
+            self._dots.append(dot)
+
+        self._alive = True
+        self._dot_count = 0
+        self.top.after(10, self._apply_rounded)
+        self.top.after(300, self._tick)
+
+    def _apply_rounded(self) -> None:
+        if not self.top.winfo_exists():
+            return
+        try:
+            hwnd = self.top.winfo_id()
+            h = self._h
+            hrgn = ctypes.windll.gdi32.CreateRoundRectRgn(
+                0, 0, self._w + 1, h + 1, h, h
+            )
+            ctypes.windll.user32.SetWindowRgn(hwnd, hrgn, True)
+        except Exception:
+            pass
+
+    def _tick(self) -> None:
+        if not self._alive or not self.top.winfo_exists():
+            return
+        self._dot_count = (self._dot_count % 3) + 1
+        for i, dot in enumerate(self._dots):
+            self._cv.itemconfig(
+                dot, fill=self._fg if i < self._dot_count else self._dot_hidden
+            )
+        self.top.after(400, self._tick)
 
     def close(self) -> None:
         self._alive = False
@@ -720,8 +882,8 @@ class SettingsWindow:
 
         self.win = tk.Toplevel(self.app.overlay.root)
         self.win.title("EuroWisprFlow Einstellungen")
-        self.win.geometry("580x680")
-        self.win.resizable(False, False)
+        _center_on_target(self.win, 580, 780)
+        self.win.resizable(False, True)
         self.win.attributes("-topmost", True)
 
         frm = ttk.Frame(self.win, padding=12)
@@ -741,11 +903,15 @@ class SettingsWindow:
         self.hotkey_var = tk.StringVar(value="+".join(cfg["hotkey_keys"]))
         self.restore_var = tk.BooleanVar(value=cfg["restore_clipboard"])
         self.elevate_var = tk.BooleanVar(value=cfg.get("auto_elevate", False))
-        self.llm_enabled_var = tk.BooleanVar(value=cfg.get("llm_correction_enabled", False))
-        self.llm_url_var = tk.StringVar(value=cfg.get("llm_correction_url", ""))
-        llm_port_val = cfg.get("llm_correction_port", None)
-        self.llm_port_var = tk.StringVar(value=str(llm_port_val) if llm_port_val else "")
-        self.llm_model_var = tk.StringVar(value=cfg.get("llm_correction_model", ""))
+        self.llm_enabled_var = tk.BooleanVar(value=cfg.get("correction_enabled", False))
+        self.llm_url_var = tk.StringVar(value=cfg.get("correction_url", ""))
+        llm_port_val = cfg.get("correction_port", None)
+        self.llm_port_var = tk.StringVar(
+            value=str(llm_port_val) if llm_port_val else ""
+        )
+        self.llm_model_var = tk.StringVar(value=cfg.get("correction_model", ""))
+        self.whisper_token_var = tk.StringVar(value=cfg.get("whisper_token", ""))
+        self.llm_token_var = tk.StringVar(value=cfg.get("correction_token", ""))
 
         devices = []
         selected_index = 0
@@ -782,6 +948,11 @@ class SettingsWindow:
 
         ttk.Label(srv, text="Health-Endpoint").grid(row=3, column=0, **LBL)
         ttk.Entry(srv, textvariable=self.health_var).grid(row=3, column=1, **INP)
+
+        ttk.Label(srv, text="Token (Bearer)").grid(row=4, column=0, **LBL)
+        ttk.Entry(srv, textvariable=self.whisper_token_var, show="*").grid(
+            row=4, column=1, **INP
+        )
 
         # ── Audio ─────────────────────────────────────────────
         aud = ttk.LabelFrame(frm, text=" Audio ", padding=(10, 6))
@@ -850,8 +1021,41 @@ class SettingsWindow:
             row=2, column=1, sticky="w", pady=3
         )
 
-        ttk.Label(llm, text="Modell").grid(row=3, column=0, **LBL)
-        ttk.Entry(llm, textvariable=self.llm_model_var).grid(row=3, column=1, **INP)
+        ttk.Label(llm, text="Token (Bearer)").grid(row=3, column=0, **LBL)
+        ttk.Entry(llm, textvariable=self.llm_token_var, show="*").grid(
+            row=3, column=1, **INP
+        )
+
+        ttk.Label(llm, text="Modell").grid(row=4, column=0, **LBL)
+        self.llm_model_combo = ttk.Combobox(
+            llm, textvariable=self.llm_model_var, state="normal"
+        )
+        self.llm_model_combo.grid(row=4, column=1, **INP)
+
+        def _refresh_models(*_):
+            def _fetch():
+                try:
+                    base = _build_base_url(
+                        self.llm_url_var.get().strip(),
+                        self.llm_port_var.get().strip(),
+                    )
+                    url = base.rstrip("/") + "/api/tags"
+                    resp = requests.get(url, timeout=5)
+                    resp.raise_for_status()
+                    names = sorted(
+                        [m["name"] for m in resp.json().get("models", [])],
+                        key=lambda n: n.rsplit("/", 1)[-1].lower(),
+                    )
+                except Exception:
+                    names = []
+                self.win.after(0, lambda: self.llm_model_combo.configure(values=names))
+
+            threading.Thread(target=_fetch, daemon=True).start()
+
+        ttk.Button(llm, text="↻", width=3, command=_refresh_models).grid(
+            row=4, column=2, padx=(4, 0), pady=3
+        )
+        _refresh_models()
 
         # ── Buttons ───────────────────────────────────────────
         btns = ttk.Frame(frm)
@@ -863,6 +1067,9 @@ class SettingsWindow:
             side="left", padx=4
         )
         ttk.Button(btns, text="Whisper testen", command=self.test_whisper).pack(
+            side="left", padx=4
+        )
+        ttk.Button(btns, text="LLM testen", command=self.test_llm).pack(
             side="left", padx=4
         )
 
@@ -904,26 +1111,31 @@ class SettingsWindow:
         ]
         cfg["restore_clipboard"] = bool(self.restore_var.get())
         cfg["auto_elevate"] = bool(self.elevate_var.get())
-        cfg["llm_correction_enabled"] = bool(self.llm_enabled_var.get())
-        cfg["llm_correction_url"] = self.llm_url_var.get().strip()
+        cfg["correction_enabled"] = bool(self.llm_enabled_var.get())
+        cfg["correction_url"] = self.llm_url_var.get().strip()
         llm_port_str = self.llm_port_var.get().strip()
-        cfg["llm_correction_port"] = (
+        cfg["correction_port"] = (
             int(llm_port_str)
             if llm_port_str.isdigit() and int(llm_port_str) > 0
             else None
         )
-        cfg["llm_correction_model"] = self.llm_model_var.get().strip()
+        cfg["correction_model"] = self.llm_model_var.get().strip()
+        cfg["whisper_token"] = self.whisper_token_var.get().strip()
+        cfg["correction_token"] = self.llm_token_var.get().strip()
 
         save_config(cfg)
         self.app.reload_config()
         messagebox.showinfo(
-            "Gespeichert", "Einstellungen gespeichert. Hotkey ist sofort aktualisiert."
+            "Gespeichert",
+            "Einstellungen gespeichert. Hotkey ist sofort aktualisiert.",
+            parent=self.win,
         )
 
     def reset_to_defaults(self):
         if not messagebox.askyesno(
             "Werkseinstellungen",
             "Alle Einstellungen auf Standardwerte zurücksetzen?",
+            parent=self.win,
         ):
             return
 
@@ -942,20 +1154,22 @@ class SettingsWindow:
         self.restore_var.set(DEFAULT_CONFIG["restore_clipboard"])
         self.elevate_var.set(DEFAULT_CONFIG["auto_elevate"])
         self.device_var.set("")
-        self.llm_enabled_var.set(DEFAULT_CONFIG.get("llm_correction_enabled", False))
-        self.llm_url_var.set(DEFAULT_CONFIG.get("llm_correction_url", ""))
-        llm_port_def = DEFAULT_CONFIG.get("llm_correction_port", None)
+        self.llm_enabled_var.set(DEFAULT_CONFIG.get("correction_enabled", False))
+        self.llm_url_var.set(DEFAULT_CONFIG.get("correction_url", ""))
+        llm_port_def = DEFAULT_CONFIG.get("correction_port", None)
         self.llm_port_var.set(str(llm_port_def) if llm_port_def else "")
-        self.llm_model_var.set(DEFAULT_CONFIG.get("llm_correction_model", ""))
+        self.llm_model_var.set(DEFAULT_CONFIG.get("correction_model", ""))
 
-        messagebox.showinfo("Werkseinstellungen", "Einstellungen wurden zurückgesetzt.")
+        messagebox.showinfo(
+            "Werkseinstellungen", "Einstellungen wurden zurückgesetzt.", parent=self.win
+        )
 
     def open_vocabulary(self):
         if not self.win or not self.win.winfo_exists():
             return
         vwin = tk.Toplevel(self.win)
         vwin.title("Vokabular verwalten")
-        vwin.geometry("480x430")
+        _center_on_target(vwin, 480, 430)
         vwin.resizable(True, True)
         vwin.attributes("-topmost", True)
 
@@ -1050,7 +1264,7 @@ class SettingsWindow:
         def _add():
             dlg = tk.Toplevel(vwin)
             dlg.title("Eintrag hinzufügen")
-            dlg.geometry("320x120")
+            _center_on_target(dlg, 320, 120)
             dlg.resizable(False, False)
             dlg.attributes("-topmost", True)
             df = ttk.Frame(dlg, padding=10)
@@ -1114,7 +1328,7 @@ class SettingsWindow:
                 device=device_id, samplerate=samplerate, channels=channels
             )
         except Exception as e:
-            messagebox.showerror("Mikrofontest fehlgeschlagen", str(e))
+            messagebox.showerror("Mikrofontest fehlgeschlagen", str(e), parent=self.win)
             return
 
         frames: list = []
@@ -1122,11 +1336,16 @@ class SettingsWindow:
         lock = threading.Lock()
 
         def _cb(indata, n_frames, time_info, status):
-            with lock:
-                frames.append(indata.copy())
-                rms_box[0] = float(np.sqrt(np.mean(indata**2)))
+            try:
+                with lock:
+                    frames.append(indata.copy())
+                    rms_box[0] = float(np.sqrt(np.mean(indata**2)))
+            except BaseException:
+                pass
 
-        popup = _MicLevelPopup(self.app.overlay.root)
+        popup = _MicLevelPopup(
+            self.app.overlay.root, llm_enabled=self.app.config.correction_enabled
+        )
         stream = sd.InputStream(
             device=device_id,
             samplerate=samplerate,
@@ -1158,11 +1377,15 @@ class SettingsWindow:
                 self.app.overlay.root.after(2000, self.app.overlay.hide)
                 if peak < 0.01:
                     messagebox.showwarning(
-                        "Mikrofontest", f"Sehr niedriger Pegel: {peak:.3f}"
+                        "Mikrofontest",
+                        f"Sehr niedriger Pegel: {peak:.3f}",
+                        parent=self.win,
                     )
                 else:
                     messagebox.showinfo(
-                        "Mikrofontest", f"Mikrofon funktioniert. Pegel: {peak:.3f}"
+                        "Mikrofontest",
+                        f"Mikrofon funktioniert. Pegel: {peak:.3f}",
+                        parent=self.win,
                     )
 
         self.app.overlay.root.after(50, _poll)
@@ -1175,9 +1398,11 @@ class SettingsWindow:
             url = base + "/" + self.health_var.get().strip().lstrip("/")
             response = requests.get(url, timeout=5)
             response.raise_for_status()
-            messagebox.showinfo("Health Check", f"OK (HTTP {response.status_code})")
+            messagebox.showinfo(
+                "Health Check", f"OK (HTTP {response.status_code})", parent=self.win
+            )
         except Exception as e:
-            messagebox.showerror("Health Check fehlgeschlagen", str(e))
+            messagebox.showerror("Health Check fehlgeschlagen", str(e), parent=self.win)
 
     def test_whisper(self):
         try:
@@ -1188,7 +1413,7 @@ class SettingsWindow:
                 device=device_id, samplerate=samplerate, channels=channels
             )
         except Exception as e:
-            messagebox.showerror("Whisper-Test fehlgeschlagen", str(e))
+            messagebox.showerror("Whisper-Test fehlgeschlagen", str(e), parent=self.win)
             return
 
         frames: list = []
@@ -1196,11 +1421,16 @@ class SettingsWindow:
         lock = threading.Lock()
 
         def _cb(indata, n_frames, time_info, status):
-            with lock:
-                frames.append(indata.copy())
-                rms_box[0] = float(np.sqrt(np.mean(indata**2)))
+            try:
+                with lock:
+                    frames.append(indata.copy())
+                    rms_box[0] = float(np.sqrt(np.mean(indata**2)))
+            except BaseException:
+                pass
 
-        popup = _MicLevelPopup(self.app.overlay.root)
+        popup = _MicLevelPopup(
+            self.app.overlay.root, llm_enabled=self.app.config.correction_enabled
+        )
         stream = sd.InputStream(
             device=device_id,
             samplerate=samplerate,
@@ -1233,7 +1463,9 @@ class SettingsWindow:
             try:
                 sf.write(str(test_path), audio, samplerate)
             except Exception as e:
-                messagebox.showerror("Whisper-Test fehlgeschlagen", str(e))
+                messagebox.showerror(
+                    "Whisper-Test fehlgeschlagen", str(e), parent=self.win
+                )
                 return
 
             temp_cfg = Config()
@@ -1270,16 +1502,65 @@ class SettingsWindow:
                         pass
                     if isinstance(result_box[0], Exception):
                         messagebox.showerror(
-                            "Whisper-Test fehlgeschlagen", str(result_box[0])
+                            "Whisper-Test fehlgeschlagen",
+                            str(result_box[0]),
+                            parent=self.win,
                         )
                     else:
                         messagebox.showinfo(
-                            "Whisper-Test", result_box[0] or "Kein Text erkannt"
+                            "Whisper-Test",
+                            result_box[0] or "Kein Text erkannt",
+                            parent=self.win,
                         )
 
             self.app.overlay.root.after(100, _poll_transcribe)
 
         self.app.overlay.root.after(50, _poll_rec)
+
+    def test_llm(self):
+        url_str = self.llm_url_var.get().strip()
+        port_str = self.llm_port_var.get().strip()
+        model = self.llm_model_var.get().strip()
+        if not url_str or not model:
+            messagebox.showwarning(
+                "LLM testen", "Bitte URL und Modell angeben.", parent=self.win
+            )
+            return
+        result_box = [None]
+
+        def _run():
+            try:
+                base = _build_base_url(url_str, port_str)
+                url = base.rstrip("/") + "/api/generate"
+                payload = {
+                    "model": model,
+                    "prompt": "Antworte mit: OK",
+                    "stream": False,
+                }
+                resp = requests.post(url, json=payload, timeout=30)
+                resp.raise_for_status()
+                result_box[0] = resp.json().get("response", "").strip() or "OK"
+            except Exception as exc:
+                result_box[0] = exc
+
+        popup = _LLMPopup(self.win)
+        threading.Thread(target=_run, daemon=True).start()
+
+        def _poll():
+            if result_box[0] is None:
+                self.win.after(200, _poll)
+            elif isinstance(result_box[0], Exception):
+                popup.close()
+                messagebox.showerror(
+                    "LLM-Test fehlgeschlagen", str(result_box[0]), parent=self.win
+                )
+            else:
+                popup.close()
+                messagebox.showinfo(
+                    "LLM-Test", f"Antwort: {result_box[0]}", parent=self.win
+                )
+
+        self.win.after(200, _poll)
 
 
 class Tray:
@@ -1407,7 +1688,9 @@ class App:
         try:
             self.is_recording = True
             self.recorder.start()
-            self._rec_popup = _MicLevelPopup(self.overlay.root)
+            self._rec_popup = _MicLevelPopup(
+                self.overlay.root, llm_enabled=self.config.correction_enabled
+            )
 
             def _poll_rms():
                 if self.is_recording and self._rec_popup:
@@ -1468,7 +1751,9 @@ class App:
                     self._on_correction_saved,
                 )
             else:
-                messagebox.showinfo("Ergebnis", "Keine Sprache erkannt.")
+                messagebox.showinfo(
+                    "Ergebnis", "Keine Sprache erkannt.", parent=self.overlay.root
+                )
 
         except Exception as e:
             if self._rec_popup:

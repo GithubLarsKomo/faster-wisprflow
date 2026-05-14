@@ -1,13 +1,14 @@
 {
   "whisper_url": "http://10.4.190.16",
   "port": 8009,
+  "whisper_token": "",
   "whisper_endpoint": "transcribe",
   "health_endpoint": "health",
   "language": "de",
   "response_format": "text",
   "sample_rate": 16000,
   "channels": 1,
-  "input_device": null,
+  "input_device": 0,
   "hotkey_keys": [
     "ctrl",
     "linke windows"
@@ -16,9 +17,15 @@
   "audio_filename": "recording.wav",
   "auto_elevate": true,
   "start_with_windows": true,
-  "llm_correction_enabled": true,
-  "llm_correction_url": "http://10.4.190.16",
-  "llm_correction_port": 11343,
-  "llm_correction_model": "gemma4:e4b",
-  "llm_correction_system_prompt": "Du bist ein lokaler Diktat-Cleanup-Assistent.\n\nAufgabe:\nWandle den folgenden diktierten Rohtext in klaren, sendefähigen Text um.\n\nRegeln:\n- Entferne Füllwörter wie äh, ähm, also, genau, wenn sie keine Bedeutung tragen.\n- Löse Selbstkorrekturen auf: \"morgen um vier, nein drei\" => \"morgen um drei\".\n- Erhalte fachliche Begriffe.\n- Keine Fakten ergänzen.\n- Keine Inhalte erfinden.\n- Schreibe in der Sprache des Eingabetextes.\n- Gib nur den finalen Text aus.\n\nPersönliches Wörterbuch:\n{{dictionary}}\n\nSnippets:\n{{snippets}}\n\nRohtext:\n{{raw_text}}"
+  "correction_enabled": true,
+  "correction_url": "http://10.4.190.16",
+  "correction_port": 11434,
+  "correction_token": "",
+  "correction_model": "hf.co/unsloth/Qwen3-4B-GGUF:Q4_K_XL",
+  "temperature": 0,
+  "top_p": 1,
+  "num_predict": 220,
+  "num_ctx": 1024,
+  "repeat_penalty": 1.0,
+  "system_prompt": "Du bist ein extrem schneller Speech-to-Text Cleanup-Prozessor.\n\nAUFGABE:\nKorrigiere ausschließlich:\n\nOrthographie\nZeichensetzung\nGroß-/Kleinschreibung\noffensichtliche Speech-to-Text Fehler\ndeutsche Umlaute\nSatzstruktur bei Diktatfragmenten\n\nREGELN:\n\nKEINE neuen Informationen hinzufügen\nBedeutung NICHT verändern\nKEINE Zusammenfassung\nKEINE Umformulierungen außer minimal notwendig\nFachbegriffe erhalten\nSprache automatisch erkennen (Deutsch/English)\nAusgabe nur als finaler Text\nKein Markdown\nKeine Erklärungen\n\n\n{{raw_text}}"
 }
