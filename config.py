@@ -1,0 +1,168 @@
+import ctypes
+import json
+import sys
+from pathlib import Path
+
+BASE_DIR = Path(__file__).parent
+# In a PyInstaller onefile build sys.executable is the .exe itself;
+# config.json must live next to it, not inside _MEIPASS.
+if getattr(sys, "frozen", False):
+    CONFIG_PATH = Path(sys.executable).parent / "config.json"
+else:
+    CONFIG_PATH = BASE_DIR / "config.json"
+
+VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
+
+_DEFAULT_LLM_PROMPT = "\n".join(
+    [
+        "Du bist ein extrem schneller Speech-to-Text Cleanup-Prozessor.",
+        "",
+        "AUFGABE:",
+        "Korrigiere ausschließlich:",
+        "",
+        "Orthographie",
+        "Zeichensetzung",
+        "Groß-/Kleinschreibung",
+        "offensichtliche Speech-to-Text Fehler",
+        "deutsche Umlaute",
+        "Satzstruktur bei Diktatfragmenten",
+        "",
+        "REGELN:",
+        "",
+        "KEINE neuen Informationen hinzufügen",
+        "Bedeutung NICHT verändern",
+        "KEINE Zusammenfassung",
+        "KEINE Umformulierungen außer minimal notwendig",
+        "Fachbegriffe erhalten",
+        "Sprache automatisch erkennen (Deutsch/English)",
+        "Ausgabe nur als finaler Text",
+        "Kein Markdown",
+        "Keine Erklärungen",
+        "",
+        "",
+        "{{raw_text}}",
+    ]
+)
+
+
+def _resource(filename: str) -> Path:
+    """Resolve path to a bundled resource (works in PyInstaller onefile and dev)."""
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        return Path(meipass) / filename
+    return BASE_DIR / filename
+
+
+DEFAULT_CONFIG = {
+    "whisper_url": "http://10.4.190.16",
+    "port": 8009,
+    "whisper_token": "",
+    "whisper_endpoint": "transcribe",
+    "health_endpoint": "health",
+    "language": "de",
+    "response_format": "text",
+    "sample_rate": 16000,
+    "channels": 1,
+    "input_device": None,
+    "hotkey_keys": ["ctrl", "linke windows"],
+    "restore_clipboard": True,
+    "audio_filename": "recording.wav",
+    "auto_elevate": True,
+    "start_with_windows": True,
+    "correction_enabled": True,
+    "correction_url": "http://10.4.190.16",
+    "correction_port": 11434,
+    "correction_token": "",
+    "correction_model": "hf.co/unsloth/Qwen3-4B-GGUF:Q4_K_XL",
+    "temperature": 0,
+    "top_p": 1,
+    "num_predict": 220,
+    "num_ctx": 1024,
+    "repeat_penalty": 1.0,
+    "system_prompt": _DEFAULT_LLM_PROMPT,
+}
+
+
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except BaseException:
+        return False
+
+
+def auto_elevate_if_needed(config):
+    if not config.get("auto_elevate", False):
+        return
+
+    if is_admin():
+        return
+
+    exe = sys.executable
+    args = " ".join([f'"{a}"' for a in sys.argv])
+    ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, args, None, 1)
+    sys.exit(0)
+
+
+def load_config():
+    if not CONFIG_PATH.exists():
+        CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
+
+    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    merged = DEFAULT_CONFIG.copy()
+    merged.update(data)
+    return merged
+
+
+def save_config(data):
+    CONFIG_PATH.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _build_base_url(url: str, port) -> str:
+    """Combine base URL with port, omitting port if falsy or zero."""
+    url = url.rstrip("/")
+    try:
+        p = int(port)
+    except (TypeError, ValueError):
+        p = 0
+    if p > 0:
+        return f"{url}:{p}"
+    return url
+
+
+class Config:
+    def __init__(self):
+        self.reload()
+
+    def reload(self):
+        data = load_config()
+        self.raw = data
+        self.whisper_url = data["whisper_url"]
+        self.port = data.get("port", None)
+        self.whisper_token = data.get("whisper_token", "")
+        self.whisper_endpoint = data.get("whisper_endpoint", "/transcribe")
+        self.health_endpoint = data.get("health_endpoint", "/health")
+        self.language = data["language"]
+        self.response_format = data["response_format"]
+        self.sample_rate = int(data["sample_rate"])
+        self.channels = int(data["channels"])
+        self.input_device = data.get("input_device", None)
+        self.hotkey_keys = data["hotkey_keys"]
+        self.restore_clipboard = bool(data["restore_clipboard"])
+        self.audio_filename = data["audio_filename"]
+        self.correction_enabled = bool(data.get("correction_enabled", True))
+        self.correction_url = data.get("correction_url", "http://10.4.190.16")
+        self.correction_port = data.get("correction_port", 11434)
+        self.correction_token = data.get("correction_token", "")
+        self.correction_model = data.get(
+            "correction_model", "hf.co/unsloth/Qwen3-4B-GGUF:Q4_K_XL"
+        )
+        self.temperature = data.get("temperature", 0)
+        self.top_p = data.get("top_p", 1)
+        self.num_predict = data.get("num_predict", 220)
+        self.num_ctx = data.get("num_ctx", 1024)
+        self.repeat_penalty = data.get("repeat_penalty", 1.0)
+        self.system_prompt = data.get("system_prompt", _DEFAULT_LLM_PROMPT)
