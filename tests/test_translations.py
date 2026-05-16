@@ -4,10 +4,10 @@ import pytest
 
 from ui.translations import LANG_CODES, TRANSLATIONS
 
-
 # ---------------------------------------------------------------------------
 # Structure
 # ---------------------------------------------------------------------------
+
 
 def test_all_lang_codes_have_entry():
     for code in LANG_CODES:
@@ -43,16 +43,31 @@ def test_lang_codes_list_matches_translations_keys():
 
 _REQUIRED_KEYS = [
     # General UI
-    "title", "btn_save", "btn_close", "btn_factory",
+    "title",
+    "btn_save",
+    "btn_close",
+    "btn_factory",
     # Messagebox translations
-    "msg_saved_title", "msg_saved_body",
-    "msg_factory_title", "msg_factory_confirm", "msg_factory_done",
-    "msg_mic_fail_title", "msg_mic_title", "msg_mic_low_level", "msg_mic_ok",
+    "msg_saved_title",
+    "msg_saved_body",
+    "msg_factory_title",
+    "msg_factory_confirm",
+    "msg_factory_done",
+    "msg_mic_fail_title",
+    "msg_mic_title",
+    "msg_mic_low_level",
+    "msg_mic_ok",
     "msg_health_fail_title",
-    "msg_whisper_fail_title", "msg_whisper_title", "msg_whisper_no_text",
-    "msg_llm_test_title", "msg_llm_test_missing", "msg_llm_fail_title",
-    "msg_llm_title", "msg_llm_result",
+    "msg_whisper_fail_title",
+    "msg_whisper_title",
+    "msg_whisper_no_text",
+    "msg_llm_test_title",
+    "msg_llm_test_missing",
+    "msg_llm_fail_title",
+    "msg_llm_title",
+    "msg_llm_result",
 ]
+
 
 @pytest.mark.parametrize("key", _REQUIRED_KEYS)
 def test_required_key_present_in_all_langs(key):
@@ -64,6 +79,7 @@ def test_required_key_present_in_all_langs(key):
 # Spot-check: German reference values
 # ---------------------------------------------------------------------------
 
+
 def test_de_save_button():
     assert TRANSLATIONS["de"]["btn_save"] == "Speichern"
 
@@ -73,4 +89,4 @@ def test_en_save_button():
 
 
 def test_de_title():
-    assert "EuroWisprFlow" in TRANSLATIONS["de"]["title"]
+    assert "FlüsterFee" in TRANSLATIONS["de"]["title"]

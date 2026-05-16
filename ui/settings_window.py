@@ -39,7 +39,7 @@ class SettingsWindow:
         cfg = load_config()
 
         self.win = tk.Toplevel(self.app.overlay.root)
-        self.win.title("EuroWisprFlow Einstellungen")
+        self.win.title("FlüsterFee Einstellungen")
         _center_on_target(self.win, 580, 780)
         self.win.resizable(False, True)
         self.win.attributes("-topmost", True)

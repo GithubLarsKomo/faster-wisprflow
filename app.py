@@ -208,7 +208,7 @@ class App:
 
 if __name__ == "__main__":
     _mutex = ctypes.windll.kernel32.CreateMutexW(
-        None, True, "EuroWisprFlow_SingleInstance"
+        None, True, "FlüsterFee_SingleInstance"
     )
     if ctypes.windll.kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
         import tkinter as _tk
@@ -216,8 +216,8 @@ if __name__ == "__main__":
 
         _r = _tk.Tk()
         _r.withdraw()
-        _mb.showwarning("EuroWisprFlow", "EuroWisprFlow läuft bereits.")
+        _mb.showwarning("FlüsterFee", "FlüsterFee läuft bereits.")
         _r.destroy()
         sys.exit(0)
-    print("Starte EuroWisprFlow…")
+    print("Starte FlüsterFee…")
     App().run()

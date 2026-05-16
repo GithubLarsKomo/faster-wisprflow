@@ -4,7 +4,7 @@ LANG_CODES = ["de", "en", "fr", "es", "zh", "pt", "pl", "it"]
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "de": {
-        "title": "EuroWisprFlow Einstellungen",
+        "title": "FlüsterFee Einstellungen",
         "gen_frame": " Allgemein ",
         "hotkey": "Hotkey",
         "hotkey_hint": "  z. B. ctrl+linke windows",
@@ -57,10 +57,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "LLM-Test fehlgeschlagen",
         "msg_llm_title": "LLM-Test",
         "msg_llm_result": "Antwort",
-
     },
     "en": {
-        "title": "EuroWisprFlow Settings",
+        "title": "FlüsterFee Settings",
         "gen_frame": " General ",
         "hotkey": "Hotkey",
         "hotkey_hint": "  e.g. ctrl+left windows",
@@ -113,10 +112,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "LLM test failed",
         "msg_llm_title": "LLM test",
         "msg_llm_result": "Response",
-
     },
     "fr": {
-        "title": "EuroWisprFlow Paramètres",
+        "title": "FlüsterFee Paramètres",
         "gen_frame": " Général ",
         "hotkey": "Raccourci",
         "hotkey_hint": "  ex. ctrl+touche windows gauche",
@@ -169,10 +167,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "Test LLM échoué",
         "msg_llm_title": "Test LLM",
         "msg_llm_result": "Réponse",
-
     },
     "es": {
-        "title": "EuroWisprFlow Configuración",
+        "title": "FlüsterFee Configuración",
         "gen_frame": " General ",
         "hotkey": "Atajo",
         "hotkey_hint": "  p. ej. ctrl+windows izquierda",
@@ -225,10 +222,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "Prueba LLM fallida",
         "msg_llm_title": "Prueba LLM",
         "msg_llm_result": "Respuesta",
-
     },
     "zh": {
-        "title": "EuroWisprFlow 设置",
+        "title": "FlüsterFee 设置",
         "gen_frame": " 常规 ",
         "hotkey": "快捷键",
         "hotkey_hint": "  例如 ctrl+左 windows",
@@ -281,10 +277,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "LLM 测试失败",
         "msg_llm_title": "LLM 测试",
         "msg_llm_result": "回复",
-
     },
     "pt": {
-        "title": "EuroWisprFlow Configurações",
+        "title": "FlüsterFee Configurações",
         "gen_frame": " Geral ",
         "hotkey": "Atalho",
         "hotkey_hint": "  ex. ctrl+windows esquerda",
@@ -337,10 +332,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "Teste LLM falhou",
         "msg_llm_title": "Teste LLM",
         "msg_llm_result": "Resposta",
-
     },
     "pl": {
-        "title": "EuroWisprFlow Ustawienia",
+        "title": "FlüsterFee Ustawienia",
         "gen_frame": " Ogólne ",
         "hotkey": "Skrót",
         "hotkey_hint": "  np. ctrl+lewy windows",
@@ -393,10 +387,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "Test LLM nieudany",
         "msg_llm_title": "Test LLM",
         "msg_llm_result": "Odpowiedź",
-
     },
     "it": {
-        "title": "EuroWisprFlow Impostazioni",
+        "title": "FlüsterFee Impostazioni",
         "gen_frame": " Generale ",
         "hotkey": "Scorciatoia",
         "hotkey_hint": "  es. ctrl+tasto windows sinistro",
@@ -449,7 +442,6 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "msg_llm_fail_title": "Test LLM fallito",
         "msg_llm_title": "Test LLM",
         "msg_llm_result": "Risposta",
-
     },
 }
 

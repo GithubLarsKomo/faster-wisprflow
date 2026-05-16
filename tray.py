@@ -26,9 +26,7 @@ class Tray:
             pystray.MenuItem("Settings", lambda: self.app.open_settings()),
             pystray.MenuItem("Quit", lambda: self.app.quit()),
         )
-        self.icon = pystray.Icon(
-            "EuroWisprFlow", self.make_image(), "EuroWisprFlow", menu
-        )
+        self.icon = pystray.Icon("FlüsterFee", self.make_image(), "FlüsterFee", menu)
         self.icon.run()
 
     def stop(self):

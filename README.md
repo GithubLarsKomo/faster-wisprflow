@@ -1,4 +1,4 @@
-# EuroWisprFlow
+# FlüsterFee
 
 Spracheingabe-Tool für Windows. Drücke den Hotkey, sprich, lasse los — der transkribierte Text wird automatisch an der Cursorposition eingefügt.
 
@@ -29,7 +29,7 @@ Basiert auf einem lokalen [Faster-Whisper](https://github.com/SYSTRAN/faster-whi
 
 ## Schnellstart (EXE)
 
-1. `EuroWisprFlow.exe` und `config.json` in denselben Ordner legen
+1. `FlüsterFee.exe` und `config.json` in denselben Ordner legen
 2. `config.json` anpassen (Whisper-URL, Mikrofon, Hotkey)
 3. EXE starten — das Icon erscheint im System-Tray
 
@@ -69,7 +69,7 @@ Das Overlay erscheint unten mittig auf dem Ziel-Monitor und zeigt den aktuellen 
 
 ## Vokabular-Lernfunktion
 
-Nach jedem Einfügevorgang beobachtet EuroWisprFlow für bis zu 20 Sekunden die Tastatureingabe.
+Nach jedem Einfügevorgang beobachtet FlüsterFee für bis zu 20 Sekunden die Tastatureingabe.
 Sobald 3 Sekunden Pause erkannt werden, vergleicht die App den eingefügten Text mit dem aktuellen Inhalt per Clipboard-Snapshot.
 Einzelne Wort-Ersetzungen werden automatisch in `vocabulary.json` (neben `config.json`) gespeichert und bei der nächsten Transkription angewendet.
 
@@ -89,10 +89,10 @@ Das Vokabular kann unter **Einstellungen → Vokabular verwalten** eingesehen un
 ## Build (EXE erstellen)
 
 ```powershell
-uv run pyinstaller --clean --onefile --noconsole --name EuroWisprFlow --add-data "tray_icon.png;." --icon tray_icon.ico app.py
+uv run pyinstaller --clean --onefile --noconsole --name FlüsterFee --add-data "tray_icon.png;." --icon tray_icon.ico app.py
 ```
 
-Die fertige EXE liegt unter `dist\EuroWisprFlow.exe`. Die `config.json` muss **neben** der EXE liegen.
+Die fertige EXE liegt unter `dist\FlüsterFee.exe`. Die `config.json` muss **neben** der EXE liegen.
 
 ---
 

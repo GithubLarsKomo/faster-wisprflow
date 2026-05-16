@@ -9,7 +9,7 @@ from ui.utils import _target_monitor
 class Overlay:
     def __init__(self):
         self.root = tk.Tk()
-        self.root.title("EuroWisprFlow")
+        self.root.title("FlüsterFee")
         self.root.overrideredirect(True)
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.92)
