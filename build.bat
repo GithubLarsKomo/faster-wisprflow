@@ -1,5 +1,5 @@
 @echo off
 python -m pip install --upgrade pip
 pip install -r requirements.txt
-uv run pyinstaller EuroWisprFlow.spec
+.venv\Scripts\pyinstaller.exe EuroWisprFlow.spec
 pause

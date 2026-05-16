@@ -1,6 +1,7 @@
 import tkinter as tk
 
-from config import _resource
+from config import _resource, load_config
+from ui.translations import TRANSLATIONS
 from ui.utils import _target_monitor
 
 
@@ -12,9 +13,12 @@ class Overlay:
         self.root.attributes("-topmost", True)
         self.root.attributes("-alpha", 0.92)
 
+        _lang = load_config().get("language", "de")
+        _ready_text = TRANSLATIONS.get(_lang, TRANSLATIONS["de"])["status_ready"]
+
         self.label = tk.Label(
             self.root,
-            text="Bereit",
+            text=_ready_text,
             font=("Segoe UI", 18),
             bg="white",
             fg="#2a671b",
@@ -53,6 +57,14 @@ class Overlay:
     def hide(self):
         self.root.withdraw()
         self.root.update()
+
+    def update_language(self, lang: str) -> None:
+        """Update the ready-state label text when the UI language changes."""
+        ready = TRANSLATIONS.get(lang, TRANSLATIONS["de"])["status_ready"]
+        if self.label.cget("text") in {
+            d["status_ready"] for d in TRANSLATIONS.values()
+        }:
+            self.label.config(text=ready)
 
     def loop(self):
         self.root.mainloop()

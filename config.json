@@ -2,13 +2,15 @@
   "whisper_url": "http://10.4.190.16",
   "port": 8009,
   "whisper_token": "",
+  "whisper_model": "whisper-large-v3-turbo",
+  "whisper_provider": "lokal",
   "whisper_endpoint": "transcribe",
   "health_endpoint": "health",
   "language": "de",
   "response_format": "text",
   "sample_rate": 16000,
   "channels": 1,
-  "input_device": 5,
+  "input_device": null,
   "hotkey_keys": [
     "ctrl",
     "linke windows"
@@ -22,10 +24,13 @@
   "correction_port": 11434,
   "correction_token": "",
   "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+  "llm_provider": "Ollama",
+  "proxy": "",
   "temperature": 0,
   "top_p": 1,
   "num_predict": 220,
   "num_ctx": 1024,
   "repeat_penalty": 1.0,
-  "system_prompt": "Du bist ein extrem schneller Speech-to-Text Cleanup-Prozessor.\n\nAUFGABE:\nKorrigiere ausschließlich:\n\nOrthographie\nZeichensetzung\nGroß-/Kleinschreibung\noffensichtliche Speech-to-Text Fehler\ndeutsche Umlaute\nSatzstruktur bei Diktatfragmenten\n\nREGELN:\n\nKEINE neuen Informationen hinzufügen\nBedeutung NICHT verändern\nKEINE Zusammenfassung\nKEINE Umformulierungen außer minimal notwendig\nFachbegriffe erhalten\nSprache automatisch erkennen (Deutsch/English)\nAusgabe nur als finaler Text\nKein Markdown\nKeine Erklärungen\n\n\n{{raw_text}}"
+  "max_tokens": 220,
+  "system_prompt": "Du bist ein extrem schneller Speech-to-Text Cleanup-Prozessor in der ISO-Sprache {{language}}.\n\nAUFGABE:\nKorrigiere ausschließlich:\n\nOrthographie\nZeichensetzung\nGroß-/Kleinschreibung\noffensichtliche Speech-to-Text Fehler\nUmlaute in der ISO-Sprache {{language}}\nSatzstruktur bei Diktatfragmenten\n\nREGELN:\n\nKEINE neuen Informationen hinzufügen\nBedeutung NICHT verändern\nKEINE Zusammenfassung\nKEINE Umformulierungen außer minimal notwendig\nFachbegriffe erhalten\nISO-Sprache {{language}}\nAusgabe nur als finaler Text\nKein Markdown\nKeine Erklärungen"
 }

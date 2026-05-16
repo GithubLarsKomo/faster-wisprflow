@@ -23,8 +23,8 @@ class Tray:
 
     def run(self):
         menu = pystray.Menu(
-            pystray.MenuItem("Einstellungen", lambda: self.app.open_settings()),
-            pystray.MenuItem("Beenden", lambda: self.app.quit()),
+            pystray.MenuItem("Settings", lambda: self.app.open_settings()),
+            pystray.MenuItem("Quit", lambda: self.app.quit()),
         )
         self.icon = pystray.Icon(
             "EuroWisprFlow", self.make_image(), "EuroWisprFlow", menu

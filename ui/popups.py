@@ -1,6 +1,8 @@
 import ctypes
 import tkinter as tk
 
+from config import load_config
+from ui.translations import TRANSLATIONS
 from ui.utils import _target_monitor
 
 
@@ -146,6 +148,8 @@ class _LLMPopup:
     _TRANS = "#fefefe"
 
     def __init__(self, parent: tk.Misc) -> None:
+        _lang = load_config().get("language", "de")
+        _text = TRANSLATIONS.get(_lang, TRANSLATIONS["de"])["llm_request_sent"]
         pill_bg = "#99cc99"  # LLM popup always shown when LLM is in use
         fg = "#006600"
         dot_hidden = pill_bg
@@ -161,7 +165,7 @@ class _LLMPopup:
         self.top.attributes("-transparentcolor", self._TRANS)
 
         # Measure text width via a temporary label
-        tmp = tk.Label(self.top, text="Anfrage gesendet", font=self._FONT)
+        tmp = tk.Label(self.top, text=_text, font=self._FONT)
         tmp.update_idletasks()
         tw = tmp.winfo_reqwidth()
         tmp.destroy()
@@ -190,7 +194,7 @@ class _LLMPopup:
             self._PX,
             cy,
             anchor="w",
-            text="Anfrage gesendet",
+            text=_text,
             font=self._FONT,
             fill=fg,
         )

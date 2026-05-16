@@ -48,6 +48,7 @@ class App:
         self.client = WhisperClient(self.config)
         self.inserter = TextInserter(self.config)
         self.llm = LLMCorrector(self.config)
+        self.overlay.update_language(self.config.language)
 
     def hotkey_pressed(self):
         _ALIASES = {"left windows": "linke windows", "linke windows": "left windows"}
@@ -167,7 +168,7 @@ class App:
 
             if text:
                 text = self.vocab.apply(text)
-                text = self.llm.correct(text, self.vocab)
+                text = self.llm.correct(text)
                 self.inserter.insert_text(text)
                 self._correction_tracker = CorrectionTracker(self.vocab)
                 self._correction_tracker.start(

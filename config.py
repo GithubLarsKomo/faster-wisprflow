@@ -13,9 +13,9 @@ else:
 
 VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
 
-_DEFAULT_LLM_PROMPT = "\n".join(
+_DEFAULT_SYSTEM_PROMPT = "\n".join(
     [
-        "Du bist ein extrem schneller Speech-to-Text Cleanup-Prozessor.",
+        "Du bist ein extrem schneller Speech-to-Text Cleanup-Prozessor in der ISO-Sprache {{language}}.",
         "",
         "AUFGABE:",
         "Korrigiere ausschließlich:",
@@ -24,7 +24,7 @@ _DEFAULT_LLM_PROMPT = "\n".join(
         "Zeichensetzung",
         "Groß-/Kleinschreibung",
         "offensichtliche Speech-to-Text Fehler",
-        "deutsche Umlaute",
+        "Umlaute in der ISO-Sprache {{language}}",
         "Satzstruktur bei Diktatfragmenten",
         "",
         "REGELN:",
@@ -34,13 +34,10 @@ _DEFAULT_LLM_PROMPT = "\n".join(
         "KEINE Zusammenfassung",
         "KEINE Umformulierungen außer minimal notwendig",
         "Fachbegriffe erhalten",
-        "Sprache automatisch erkennen (Deutsch/English)",
+        "ISO-Sprache {{language}}",
         "Ausgabe nur als finaler Text",
         "Kein Markdown",
         "Keine Erklärungen",
-        "",
-        "",
-        "{{raw_text}}",
     ]
 )
 
@@ -57,6 +54,8 @@ DEFAULT_CONFIG = {
     "whisper_url": "http://10.4.190.16",
     "port": 8009,
     "whisper_token": "",
+    "whisper_model": "whisper-large-v3-turbo",
+    "whisper_provider": "lokal",
     "whisper_endpoint": "transcribe",
     "health_endpoint": "health",
     "language": "de",
@@ -73,13 +72,16 @@ DEFAULT_CONFIG = {
     "correction_url": "http://10.4.190.16",
     "correction_port": 11434,
     "correction_token": "",
-    "correction_model": "hf.co/unsloth/Qwen3-4B-GGUF:Q4_K_XL",
+    "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
+    "llm_provider": "Ollama",
     "temperature": 0,
     "top_p": 1,
     "num_predict": 220,
     "num_ctx": 1024,
     "repeat_penalty": 1.0,
-    "system_prompt": _DEFAULT_LLM_PROMPT,
+    "max_tokens": 220,
+    "system_prompt": _DEFAULT_SYSTEM_PROMPT,
+    "proxy": "",
 }
 
 
@@ -143,6 +145,8 @@ class Config:
         self.whisper_url = data["whisper_url"]
         self.port = data.get("port", None)
         self.whisper_token = data.get("whisper_token", "")
+        self.whisper_model = data.get("whisper_model", "")
+        self.whisper_provider = data.get("whisper_provider", "lokal")
         self.whisper_endpoint = data.get("whisper_endpoint", "/transcribe")
         self.health_endpoint = data.get("health_endpoint", "/health")
         self.language = data["language"]
@@ -158,11 +162,14 @@ class Config:
         self.correction_port = data.get("correction_port", 11434)
         self.correction_token = data.get("correction_token", "")
         self.correction_model = data.get(
-            "correction_model", "hf.co/unsloth/Qwen3-4B-GGUF:Q4_K_XL"
+            "correction_model", "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M"
         )
+        self.llm_provider = data.get("llm_provider", "Ollama")
         self.temperature = data.get("temperature", 0)
         self.top_p = data.get("top_p", 1)
         self.num_predict = data.get("num_predict", 220)
         self.num_ctx = data.get("num_ctx", 1024)
         self.repeat_penalty = data.get("repeat_penalty", 1.0)
-        self.system_prompt = data.get("system_prompt", _DEFAULT_LLM_PROMPT)
+        self.max_tokens = data.get("max_tokens", 220)
+        self.system_prompt = data.get("system_prompt", _DEFAULT_SYSTEM_PROMPT)
+        self.proxy = data.get("proxy", "")

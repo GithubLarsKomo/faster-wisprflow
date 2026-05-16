@@ -2,47 +2,74 @@ import requests
 
 from config import Config, _build_base_url
 
+_OPENROUTER_HOST = "openrouter.ai"
+_GROQ_HOST = "groq.com"
+
 
 class LLMCorrector:
-    """Sends transcribed text to a local LLM (Ollama /api/generate) for cleanup."""
+    """Sends transcribed text to a LLM via the OpenAI-compatible chat completions endpoint.
+
+    Supported backends (auto-detected from ``correction_url``):
+    - Ollama      (default): ``<correction_url>:<correction_port>/v1/chat/completions``
+    - OpenRouter  (URL contains "openrouter.ai"): ``https://openrouter.ai/api/v1/chat/completions``
+    - Groq        (URL contains "groq.com"): ``https://api.groq.com/v1/chat/completions``
+
+    The system prompt is sent as the ``system`` role; the raw text as the ``user`` role.
+    """
 
     def __init__(self, config: Config) -> None:
         self.config = config
 
-    def correct(self, text: str, vocab: "VocabularyManager") -> str:  # noqa: F821
+    def _chat_url(self) -> str:
+        provider = getattr(self.config, "llm_provider", "Ollama")
+        if provider == "Openrouter":
+            return "https://openrouter.ai/api/v1/chat/completions"
+        if provider == "Groq":
+            return "https://api.groq.com/v1/chat/completions"
+        base = _build_base_url(self.config.correction_url, self.config.correction_port)
+        return base.rstrip("/") + "/v1/chat/completions"
+
+    def _proxies(self) -> dict | None:
+        """Return a proxies dict based on config.proxy.
+        Empty string  → no proxy (bypass system proxy).
+        Non-empty str → use that proxy URL.
+        """
+        proxy = getattr(self.config, "proxy", "")
+        if proxy:
+            return {"http": proxy, "https": proxy}
+        return {"http": None, "https": None}
+
+    def correct(self, text: str) -> str:
         if not self.config.correction_enabled or not text.strip():
             return text
         try:
-            base = _build_base_url(
-                self.config.correction_url,
-                self.config.correction_port,
-            )
-            url = base.rstrip("/") + "/api/generate"
-            headers = {}
+            headers = {"Content-Type": "application/json"}
             if self.config.correction_token:
                 headers["Authorization"] = f"Bearer {self.config.correction_token}"
-            corr = vocab.all()
-            dict_str = (
-                "\n".join(f"  {k} \u2192 {v}" for k, v in sorted(corr.items()))
-                if corr
-                else "(leer)"
-            )
-            prompt = self.config.correction_system_prompt.replace(
-                "{{dictionary}}", dict_str
-            ).replace("{{raw_text}}", text)
+
+            # Set ISO code for {{language}} placeholder — the text travels as the user message
+            system_prompt = self.config.system_prompt.strip()
+            user_prompt = text.replace("{{language}}", self.config.language).strip()
             payload = {
                 "model": self.config.correction_model,
-                "prompt": prompt,
-                "temperature": self.config.correction_temperature,
-                "top_p": self.config.correction_top_p,
-                "num_predict": self.config.num_predict,
-                "num_ctx": self.config.num_ctx,
-                "repeat_penalty": self.config.repeat_penalty,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": self.config.temperature,
+                "top_p": self.config.top_p,
+                "max_tokens": self.config.max_tokens,
                 "stream": False,
             }
-            resp = requests.post(url, json=payload, timeout=30, headers=headers)
+            resp = requests.post(
+                self._chat_url(),
+                json=payload,
+                timeout=30,
+                headers=headers,
+                proxies=self._proxies(),
+            )
             resp.raise_for_status()
-            result = resp.json().get("response", "").strip()
+            result = resp.json()["choices"][0]["message"]["content"].strip()
             return result if result else text
         except Exception:
             return text

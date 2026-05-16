@@ -1,6 +1,6 @@
 altgraph==0.17.5
 certifi==2026.4.22
-cffi==2.0.0
+cffi==1.17.1
 charset-normalizer==3.4.7
 idna==3.13
 keyboard==0.13.5
