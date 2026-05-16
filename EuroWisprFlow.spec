@@ -8,6 +8,7 @@ a = Analysis(
     datas=[('tray_icon.png', '.')],
     hiddenimports=[
         'config',
+        'hotkey',
         'recorder',
         'whisper_client',
         'llm_corrector',

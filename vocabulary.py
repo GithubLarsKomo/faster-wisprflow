@@ -51,8 +51,10 @@ class VocabularyManager:
 
     def add(self, original: str, corrected: str) -> None:
         key = original.strip().lower()
-        if key and corrected.strip():
-            self._data["corrections"][key] = corrected.strip()
+        # strip only spaces (not \n \t) so control-char replacements are preserved
+        value = corrected.strip(" ")
+        if key and value:
+            self._data["corrections"][key] = value
             self.save()
 
     def remove(self, original: str) -> None:

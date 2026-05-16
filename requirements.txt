@@ -3,7 +3,6 @@ certifi==2026.4.22
 cffi==1.17.1
 charset-normalizer==3.4.7
 idna==3.13
-keyboard==0.13.5
 numpy==2.4.4
 packaging==26.2
 pefile==2024.8.26
@@ -12,6 +11,7 @@ pycparser==3.0
 pyinstaller==6.20.0
 pyinstaller-hooks-contrib==2026.5
 pyperclip==1.11.0
+pywin32
 pywin32-ctypes==0.2.3
 requests==2.33.1
 setuptools==82.0.1

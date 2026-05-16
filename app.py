@@ -2,13 +2,11 @@ import ctypes
 import queue
 import sys
 import threading
-import time
 from tkinter import messagebox
 
-import keyboard
-
-from config import Config, auto_elevate_if_needed, load_config
+from config import Config, load_config
 from correction_tracker import CorrectionTracker
+from hotkey import HotkeyManager
 from llm_corrector import LLMCorrector
 from recorder import Recorder
 from text_inserter import TextInserter
@@ -22,9 +20,6 @@ from whisper_client import WhisperClient
 
 class App:
     def __init__(self):
-        raw_cfg = load_config()
-        auto_elevate_if_needed(raw_cfg)
-
         self.config = Config()
         self.overlay = Overlay()
         self.recorder = Recorder(self.config)
@@ -34,6 +29,7 @@ class App:
         self.llm = LLMCorrector(self.config)
         self.settings = SettingsWindow(self)
         self.tray = Tray(self)
+        self._hotkey = HotkeyManager(self.overlay.root)
 
         self.is_recording = False
         self.is_busy = False
@@ -49,41 +45,28 @@ class App:
         self.inserter = TextInserter(self.config)
         self.llm = LLMCorrector(self.config)
         self.overlay.update_language(self.config.language)
+        # Re-register hotkey with potentially new key combo
+        self._register_hotkey()
+
+    def _register_hotkey(self) -> None:
+        try:
+            self._hotkey.register(
+                self.config.hotkey_keys,
+                on_press=lambda: self.event_queue.put("start"),
+                on_release=lambda: self.event_queue.put("stop"),
+            )
+        except OSError as e:
+            from tkinter import messagebox as _mb
+
+            _mb.showwarning(
+                "Hotkey",
+                f"Hotkey konnte nicht registriert werden:\n{e}",
+                parent=self.overlay.root,
+            )
 
     def hotkey_pressed(self):
-        _ALIASES = {"left windows": "linke windows", "linke windows": "left windows"}
-
-        def is_key_pressed(k):
-            try:
-                if keyboard.is_pressed(k):
-                    return True
-            except Exception:
-                pass
-            try:
-                if keyboard.is_pressed(_ALIASES.get(k.lower(), k)):
-                    return True
-            except Exception:
-                pass
-            return False
-
-        try:
-            return all(is_key_pressed(k) for k in self.config.hotkey_keys)
-        except Exception:
-            return False
-
-    def monitor_hotkey(self):
-        was_pressed = False
-        while self.running:
-            pressed = self.hotkey_pressed()
-
-            if pressed and not was_pressed:
-                self.event_queue.put("start")
-
-            if not pressed and was_pressed:
-                self.event_queue.put("stop")
-
-            was_pressed = pressed
-            time.sleep(0.03)
+        # Kept for backwards-compat; always False now (RegisterHotKey handles it).
+        return False
 
     def process_events(self):
         try:
@@ -208,6 +191,7 @@ class App:
 
     def _quit_mainthread(self):
         self.running = False
+        self._hotkey.unregister()
         try:
             self.tray.stop()
         except Exception:
@@ -216,7 +200,7 @@ class App:
         self.overlay.root.destroy()
 
     def run(self):
-        threading.Thread(target=self.monitor_hotkey, daemon=True).start()
+        self._register_hotkey()
         threading.Thread(target=self.tray.run, daemon=True).start()
         self.overlay.root.after(50, self.process_events)
         self.overlay.loop()

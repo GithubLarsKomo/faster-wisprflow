@@ -93,16 +93,8 @@ def is_admin():
 
 
 def auto_elevate_if_needed(config):
-    if not config.get("auto_elevate", False):
-        return
-
-    if is_admin():
-        return
-
-    exe = sys.executable
-    args = " ".join([f'"{a}"' for a in sys.argv])
-    ctypes.windll.shell32.ShellExecuteW(None, "runas", exe, args, None, 1)
-    sys.exit(0)
+    """No-op: elevation is no longer required. Kept for config compatibility."""
+    pass
 
 
 def load_config():

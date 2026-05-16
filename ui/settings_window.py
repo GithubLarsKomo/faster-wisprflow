@@ -583,10 +583,18 @@ class SettingsWindow:
         frm.rowconfigure(0, weight=1)
         frm.columnconfigure(0, weight=1)
 
+        def _esc(s: str) -> str:
+            """Escape real control chars to printable literals for display/editing."""
+            return s.replace("\n", "\\n").replace("\t", "\\t").replace("\r", "\\r")
+
+        def _unesc(s: str) -> str:
+            """Convert typed escape sequences (\\n, \\t) to real control chars."""
+            return s.replace("\\n", "\n").replace("\\t", "\t").replace("\\r", "\r")
+
         def _refresh():
             tree.delete(*tree.get_children())
             for orig, corr in sorted(self.app.vocab.all().items()):
-                tree.insert("", "end", values=(orig, corr))
+                tree.insert("", "end", values=(orig, _esc(corr)))
 
         _refresh()
 
@@ -608,6 +616,9 @@ class SettingsWindow:
         )
         ef.columnconfigure(1, weight=1)
         ef.columnconfigure(3, weight=1)
+        ttk.Label(
+            edit_frm, text="Tipp: \\n = Zeilenumbruch, \\t = Tab", foreground="gray"
+        ).pack(anchor="w", pady=(2, 0))
         # edit_frm starts hidden — gridded only when entering edit mode
 
         # ── Button-Leiste (row=2) ──────────────────────────────────────────
@@ -623,7 +634,7 @@ class SettingsWindow:
             orig, corr = tree.item(sel[0])["values"]
             _editing_orig[0] = str(orig)
             edit_orig_var.set(str(orig))
-            edit_corr_var.set(str(corr))
+            edit_corr_var.set(_esc(str(corr)))
             # show inline edit frame
             edit_frm.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(4, 0))
             # swap buttons: hide normal set, show save/cancel
@@ -636,8 +647,8 @@ class SettingsWindow:
 
         def _save_edit():
             o = edit_orig_var.get().strip()
-            c = edit_corr_var.get().strip()
-            if o and c:
+            c = _unesc(edit_corr_var.get())
+            if o and c.strip(" "):
                 old_key = _editing_orig[0]
                 if old_key and old_key.lower() != o.lower():
                     self.app.vocab.remove(old_key)
@@ -677,18 +688,21 @@ class SettingsWindow:
             ttk.Entry(df, textvariable=corr_var, width=22).grid(
                 row=1, column=1, sticky="ew", pady=(6, 0)
             )
+            ttk.Label(
+                df, text="\\n = Zeilenumbruch, \\t = Tab", foreground="gray"
+            ).grid(row=2, column=0, columnspan=2, sticky="w", pady=(2, 0))
             df.columnconfigure(1, weight=1)
 
             def _ok():
                 o = orig_var.get().strip()
-                c = corr_var.get().strip()
-                if o and c:
+                c = _unesc(corr_var.get())
+                if o and c.strip(" "):
                     self.app.vocab.add(o, c)
                     _refresh()
                     dlg.destroy()
 
             ttk.Button(df, text="OK", command=_ok).grid(
-                row=2, column=0, columnspan=2, pady=(10, 0)
+                row=3, column=0, columnspan=2, pady=(10, 0)
             )
 
         def _remove():
