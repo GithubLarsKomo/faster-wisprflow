@@ -39,28 +39,53 @@ class LLMCorrector:
             return {"http": proxy, "https": proxy}
         return {"http": None, "https": None}
 
+    def _build_payload(self, text: str) -> tuple[dict, dict]:
+        """Return (headers, payload) for a chat-completions request."""
+        headers = {"Content-Type": "application/json"}
+        if self.config.correction_token:
+            headers["Authorization"] = f"Bearer {self.config.correction_token}"
+        system_prompt = self.config.system_prompt.strip()
+        user_prompt = text.replace("{{language}}", self.config.language).strip()
+        payload = {
+            "model": self.config.correction_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": self.config.temperature,
+            "top_p": self.config.top_p,
+            "max_tokens": self.config.max_tokens,
+            "stream": False,
+        }
+        return headers, payload
+
+    def probe(self, text: str) -> str:
+        """Like correct(), but raises on any HTTP or API error (used for testing)."""
+        headers, payload = self._build_payload(text)
+        resp = requests.post(
+            self._chat_url(),
+            json=payload,
+            timeout=30,
+            headers=headers,
+            proxies=self._proxies(),
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if "error" in data:
+            err = data["error"]
+            msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
+            raise ValueError(msg)
+        choices = data.get("choices") or []
+        if not choices:
+            raise ValueError(f"Empty response from API: {data}")
+        result = choices[0]["message"]["content"].strip()
+        return result
+
     def correct(self, text: str) -> str:
         if not self.config.correction_enabled or not text.strip():
             return text
         try:
-            headers = {"Content-Type": "application/json"}
-            if self.config.correction_token:
-                headers["Authorization"] = f"Bearer {self.config.correction_token}"
-
-            # Set ISO code for {{language}} placeholder — the text travels as the user message
-            system_prompt = self.config.system_prompt.strip()
-            user_prompt = text.replace("{{language}}", self.config.language).strip()
-            payload = {
-                "model": self.config.correction_model,
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-                "temperature": self.config.temperature,
-                "top_p": self.config.top_p,
-                "max_tokens": self.config.max_tokens,
-                "stream": False,
-            }
+            headers, payload = self._build_payload(text)
             resp = requests.post(
                 self._chat_url(),
                 json=payload,

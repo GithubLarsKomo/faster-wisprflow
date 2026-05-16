@@ -471,6 +471,12 @@ class SettingsWindow:
                 return device_id
         return None
 
+    def _tr(self) -> dict:
+        """Return the translation dict for the currently selected language."""
+        lang = getattr(self, "lang_var", None)
+        lang = lang.get() if lang else load_config().get("language", "de")
+        return TRANSLATIONS.get(lang, TRANSLATIONS["de"])
+
     def save(self):
         cfg = load_config()
         cfg["whisper_url"] = self.url_var.get().strip()
@@ -507,16 +513,18 @@ class SettingsWindow:
 
         save_config(cfg)
         self.app.reload_config()
+        tr = self._tr()
         messagebox.showinfo(
-            "Gespeichert",
-            "Einstellungen gespeichert. Hotkey ist sofort aktualisiert.",
+            tr["msg_saved_title"],
+            tr["msg_saved_body"],
             parent=self.win,
         )
 
     def reset_to_defaults(self):
+        tr = self._tr()
         if not messagebox.askyesno(
-            "Werkseinstellungen",
-            "Alle Einstellungen auf Standardwerte zurücksetzen?",
+            tr["msg_factory_title"],
+            tr["msg_factory_confirm"],
             parent=self.win,
         ):
             return
@@ -547,7 +555,7 @@ class SettingsWindow:
         self.proxy_var.set(DEFAULT_CONFIG.get("proxy", ""))
 
         messagebox.showinfo(
-            "Werkseinstellungen", "Einstellungen wurden zurückgesetzt.", parent=self.win
+            tr["msg_factory_title"], tr["msg_factory_done"], parent=self.win
         )
 
     def open_vocabulary(self):
@@ -718,7 +726,9 @@ class SettingsWindow:
             )
         except Exception as e:
             self._set_testing(False)
-            messagebox.showerror("Mikrofontest fehlgeschlagen", str(e), parent=self.win)
+            messagebox.showerror(
+                self._tr()["msg_mic_fail_title"], str(e), parent=self.win
+            )
             return
 
         frames: list = []
@@ -767,15 +777,17 @@ class SettingsWindow:
                 self.app.overlay.set_text(f"\u2705 Pegel: {peak:.3f}")
                 self.app.overlay.root.after(2000, self.app.overlay.hide)
                 if peak < 0.01:
+                    tr = self._tr()
                     messagebox.showwarning(
-                        "Mikrofontest",
-                        f"Sehr niedriger Pegel: {peak:.3f}",
+                        tr["msg_mic_title"],
+                        f"{tr['msg_mic_low_level']}: {peak:.3f}",
                         parent=self.win,
                     )
                 else:
+                    tr = self._tr()
                     messagebox.showinfo(
-                        "Mikrofontest",
-                        f"Mikrofon funktioniert. Pegel: {peak:.3f}",
+                        tr["msg_mic_title"],
+                        f"{tr['msg_mic_ok']}: {peak:.3f}",
                         parent=self.win,
                     )
 
@@ -796,7 +808,9 @@ class SettingsWindow:
                 "Health Check", f"OK (HTTP {response.status_code})", parent=self.win
             )
         except Exception as e:
-            messagebox.showerror("Health Check fehlgeschlagen", str(e), parent=self.win)
+            messagebox.showerror(
+                self._tr()["msg_health_fail_title"], str(e), parent=self.win
+            )
         finally:
             self._set_testing(False)
 
@@ -818,7 +832,9 @@ class SettingsWindow:
             )
         except Exception as e:
             self._set_testing(False)
-            messagebox.showerror("Whisper-Test fehlgeschlagen", str(e), parent=self.win)
+            messagebox.showerror(
+                self._tr()["msg_whisper_fail_title"], str(e), parent=self.win
+            )
             return
 
         frames: list = []
@@ -870,7 +886,7 @@ class SettingsWindow:
             except Exception as e:
                 self._set_testing(False)
                 messagebox.showerror(
-                    "Whisper-Test fehlgeschlagen", str(e), parent=self.win
+                    self._tr()["msg_whisper_fail_title"], str(e), parent=self.win
                 )
                 return
             temp_cfg = Config()
@@ -911,15 +927,17 @@ class SettingsWindow:
                     except Exception:
                         pass
                     if isinstance(result_box[0], Exception):
+                        tr = self._tr()
                         messagebox.showerror(
-                            "Whisper-Test fehlgeschlagen",
+                            tr["msg_whisper_fail_title"],
                             str(result_box[0]),
                             parent=self.win,
                         )
                     else:
+                        tr = self._tr()
                         messagebox.showinfo(
-                            "Whisper-Test",
-                            result_box[0] or "Kein Text erkannt",
+                            tr["msg_whisper_title"],
+                            result_box[0] or tr["msg_whisper_no_text"],
                             parent=self.win,
                         )
 
@@ -939,8 +957,9 @@ class SettingsWindow:
         port_str = self.llm_port_var.get().strip()
         model = self.llm_model_var.get().strip()
         if not url_str or not model:
+            tr = self._tr()
             messagebox.showwarning(
-                "Korrektur testen", "Bitte URL und Modell angeben.", parent=self.win
+                tr["msg_llm_test_title"], tr["msg_llm_test_missing"], parent=self.win
             )
             return
         self._set_testing(True)
@@ -957,7 +976,7 @@ class SettingsWindow:
                 temp_cfg.correction_token = self.llm_token_var.get().strip()
                 temp_cfg.system_prompt = ""
                 temp_cfg.proxy = self.proxy_var.get().strip()
-                result = LLMCorrector(temp_cfg).correct("Antworte mit: OK")
+                result = LLMCorrector(temp_cfg).probe("Antworte mit: OK")
                 result_box[0] = result or "OK"
             except Exception as exc:
                 result_box[0] = exc
@@ -972,13 +991,18 @@ class SettingsWindow:
                 popup.close()
                 self._set_testing(False)
                 messagebox.showerror(
-                    "LLM-Test fehlgeschlagen", str(result_box[0]), parent=self.win
+                    self._tr()["msg_llm_fail_title"],
+                    str(result_box[0]),
+                    parent=self.win,
                 )
             else:
                 popup.close()
                 self._set_testing(False)
+                tr = self._tr()
                 messagebox.showinfo(
-                    "LLM-Test", f"Antwort: {result_box[0]}", parent=self.win
+                    tr["msg_llm_title"],
+                    f"{tr['msg_llm_result']}: {result_box[0]}",
+                    parent=self.win,
                 )
 
         self.win.after(200, _poll)

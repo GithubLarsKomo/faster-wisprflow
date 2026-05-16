@@ -1,3 +1,4 @@
+import ctypes
 import tkinter as tk
 
 from config import _resource, load_config
@@ -49,6 +50,19 @@ class Overlay:
         self.root.geometry(f"+{x}+{y}")
         self.root.deiconify()
         self.root.update()
+        self.root.after(10, self._apply_rounded)
+
+    def _apply_rounded(self) -> None:
+        if not self.root.winfo_exists():
+            return
+        try:
+            w = self.root.winfo_width()
+            h = self.root.winfo_height()
+            hwnd = self.root.winfo_id()
+            hrgn = ctypes.windll.gdi32.CreateRoundRectRgn(0, 0, w + 1, h + 1, h, h)
+            ctypes.windll.user32.SetWindowRgn(hwnd, hrgn, True)
+        except Exception:
+            pass
 
     def set_text(self, text):
         self.label.config(text=text)
