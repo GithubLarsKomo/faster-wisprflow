@@ -66,6 +66,11 @@ _REQUIRED_KEYS = [
     "msg_llm_fail_title",
     "msg_llm_title",
     "msg_llm_result",
+    # Runtime error messages
+    "msg_error",
+    "msg_no_audio",
+    "msg_no_speech",
+    "msg_result_title",
 ]
 
 

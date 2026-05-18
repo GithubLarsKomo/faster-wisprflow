@@ -15,10 +15,10 @@ sys.modules.setdefault("soundfile", MagicMock())
 from recorder import Recorder
 from tests.conftest import make_stub_config
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def make_recorder(**kw):
     cfg = make_stub_config(**kw)
@@ -32,6 +32,7 @@ def _fake_indata(value=0.5, shape=(1024, 1)):
 # ---------------------------------------------------------------------------
 # _callback
 # ---------------------------------------------------------------------------
+
 
 class TestCallback:
     def test_appends_frame_when_recording(self):
@@ -84,6 +85,7 @@ class TestCallback:
 # stop — raises when no frames
 # ---------------------------------------------------------------------------
 
+
 class TestStop:
     def test_raises_when_no_audio(self, tmp_path):
         rec = make_recorder(audio_filename="rec.wav")
@@ -91,7 +93,7 @@ class TestStop:
         rec.frames = []
 
         with patch("recorder.BASE_DIR", tmp_path):
-            with pytest.raises(RuntimeError, match="Keine Audiodaten"):
+            with pytest.raises(RuntimeError, match="no_audio"):
                 rec.stop()
 
     def test_writes_wav_and_returns_path(self, tmp_path):
@@ -101,6 +103,7 @@ class TestStop:
         rec.frames = [np.zeros((512, 1), dtype="float32")]
 
         import soundfile as sf_mock
+
         with patch("recorder.BASE_DIR", tmp_path):
             path = rec.stop()
 

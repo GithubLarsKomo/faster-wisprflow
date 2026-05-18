@@ -97,7 +97,7 @@ class TestBuildPayload:
         msgs = payload["messages"]
         assert msgs[0]["role"] == "system"
         assert msgs[1]["role"] == "user"
-        assert msgs[1]["content"] == "test text"
+        assert "test text" in msgs[1]["content"]
 
     def test_language_placeholder_substituted(self):
         cfg = make_stub_config(

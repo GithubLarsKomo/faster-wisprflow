@@ -52,7 +52,7 @@ class Recorder:
 
         with self.lock:
             if not self.frames:
-                raise RuntimeError("Keine Audiodaten aufgenommen")
+                raise RuntimeError("no_audio")
             audio = np.concatenate(self.frames, axis=0)
 
         sf.write(str(audio_path), audio, self.config.sample_rate)

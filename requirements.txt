@@ -3,6 +3,7 @@ certifi==2026.4.22
 cffi==1.17.1
 charset-normalizer==3.4.7
 idna==3.13
+keyboard==0.13.5
 numpy==2.4.4
 packaging==26.2
 pefile==2024.8.26

@@ -1,9 +1,9 @@
 # Test Suite
 
-166 tests across 9 modules. Run with:
+128 tests across 7 modules. Run with:
 
-```bash
-uv run pytest tests/
+```powershell
+.venv\Scripts\python.exe -m pytest tests/ -q
 ```
 
 ---
@@ -14,8 +14,6 @@ uv run pytest tests/
 tests/
 ├── conftest.py                  # Shared fixtures and helpers
 ├── test_config.py               # config.py
-├── test_correction_tracker.py   # correction_tracker.py
-├── test_hotkey.py               # hotkey.py
 ├── test_llm_corrector.py        # llm_corrector.py
 ├── test_recorder.py             # recorder.py
 ├── test_text_inserter.py        # text_inserter.py
@@ -51,33 +49,6 @@ Tests `_build_base_url`, `load_config`, `save_config`, the `Config` class, and t
 
 ---
 
-## `test_correction_tracker.py` — 18 tests
-
-Tests the pure `_word_diff` static method, the `CorrectionTracker` start/stop lifecycle, deadline-based polling, and the low-level Win32 `SendInput` helpers.
-
-| Class | What it checks |
-|---|---|
-| `TestWordDiff` (9) | Simple word substitutions detected; identical text yields no pairs; insertions and deletions (non-equal-length diffs) ignored; punctuation stripped before comparison; case-only changes filtered; multiple simultaneous substitutions with surrounding context |
-| `TestCorrectionTrackerLifecycle` (4) | Empty text skips monitor installation; non-empty text installs `_KeyboardActivityMonitor` and calls the after-callback; `stop()` releases the monitor; double `stop()` is safe |
-| `TestPoll` (1) | `_poll` exits when its deadline passes |
-| `TestSendInputHelpers` (4) | `_shift_select_left(0)` is a no-op; `_shift_select_left(n)` sends the right number of inputs; `_ctrl_c` sends 4 inputs; `_press_right` sends 2 inputs |
-
-**Note:** `sounddevice` and `soundfile` are stubbed via `sys.modules.setdefault` at the top of relevant test files because they require hardware.
-
----
-
-## `test_hotkey.py` — 21 tests
-
-Tests `_VK_MAP`, `_parse_hotkey`, and `_any_pressed`.
-
-| Class | What it checks |
-|---|---|
-| `TestVkMap` (4) | Letters map to their uppercase `ord`; digits map correctly; F1–F24 virtual key codes; named keys present (`space`, `tab`, `return`, `enter`, `escape`, `backspace`) |
-| `TestParseHotkey` (14) | `ctrl`/`control`, `shift`, `alt`, `win` set the correct modifier bit; German aliases `"linke windows"` and `"rechte windows"` map to `MOD_WIN`; combined modifiers; letter and function key VK resolution; unknown keys yield VK `0`; `MOD_NOREPEAT` is always set; empty list handled; whitespace trimmed |
-| `TestAnyPressed` (3) | Returns `True` when a key is held; `False` when not; `True` if any key in a list is held; empty list returns `False` |
-
----
-
 ## `test_llm_corrector.py` — 21 tests
 
 Tests `LLMCorrector` URL routing, proxy configuration, payload construction, the `correct()` method, and the `probe()` method.
@@ -103,7 +74,7 @@ Tests the `Recorder` audio callback and the `stop()` method. `sounddevice` and `
 
 ---
 
-## `test_text_inserter.py` — 16 tests
+## `test_text_inserter.py` — 15 tests
 
 Tests `_foreground_exe`, `_set_clipboard_text`, `_get_clipboard_text`, and `TextInserter.insert_text` by mocking Win32 ctypes calls.
 
@@ -112,11 +83,11 @@ Tests `_foreground_exe`, `_set_clipboard_text`, `_get_clipboard_text`, and `Text
 | `TestForegroundExe` (3) | Returns lowercased basename; returns `""` when `OpenProcess` returns a null handle; returns `""` on any exception |
 | `TestSetClipboardText` (3) | Returns `True` on full success; returns `False` when `OpenClipboard` fails; returns `False` when `GlobalAlloc` fails |
 | `TestGetClipboardText` (3) | Returns the clipboard string; returns `None` when no text data; returns `None` when clipboard cannot be opened |
-| `TestTextInserter` (7) | Early-returns on empty string; calls `_set_clipboard_text` with the given text; restores previous clipboard content when `restore_clipboard=True`; does not restore when `restore_clipboard=False`; applies extra delay for Word; does not apply extra delay for other apps; sends Ctrl+V |
+| `TestTextInserter` (6) | Early-returns on empty string; calls `_set_clipboard_text` with the given text; restores previous clipboard content when `restore_clipboard=True`; does not restore when `restore_clipboard=False`; applies extra delay for Word; sends Ctrl+V |
 
 ---
 
-## `test_translations.py` — 27 tests
+## `test_translations.py` — 33 tests
 
 Tests `ui/translations.py` for structural completeness across all 8 supported languages.
 
@@ -126,7 +97,7 @@ Tests `ui/translations.py` for structural completeness across all 8 supported la
 | `test_no_extra_keys_missing_in_other_langs` | All languages have exactly the same keys as German (the reference) |
 | `test_no_empty_translations` | No translation value is an empty string |
 | `test_lang_codes_list_matches_translations_keys` | `LANG_CODES` list is in sync with `TRANSLATIONS` keys |
-| `test_required_key_present_in_all_langs` (parametrized × 21 keys) | 21 UI keys are present in every language |
+| `test_required_key_present_in_all_langs` (parametrized × 25 keys) | 25 UI keys are present in every language |
 | `test_de_save_button`, `test_en_save_button`, `test_de_title` | Spot-checks for specific German and English strings |
 
 ---

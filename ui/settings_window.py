@@ -9,12 +9,15 @@ import sounddevice as sd
 import soundfile as sf
 
 from config import (
+    _DEFAULT_SYSTEM_PROMPT,
     BASE_DIR,
     DEFAULT_CONFIG,
     Config,
     _build_base_url,
     load_config,
+    load_system_prompt,
     save_config,
+    save_system_prompt,
 )
 from llm_corrector import LLMCorrector
 from ui.popups import _LLMPopup, _MicLevelPopup
@@ -310,6 +313,7 @@ class SettingsWindow:
 
         _btn_save_ref: list = [None]
         _btn_health_ref: list = [None]
+        _btn_prompt_ref: list = [None]
 
         def _apply_lang(*_):
             lang = self.lang_var.get()
@@ -352,6 +356,8 @@ class SettingsWindow:
             if _btn_save_ref[0] is not None:
                 _btn_save_ref[0].configure(text=t["btn_save"])
             _btn_vocab.configure(text=t["btn_vocab"])
+            if _btn_prompt_ref[0] is not None:
+                _btn_prompt_ref[0].configure(text=t["btn_prompt"])
             _btn_close.configure(text=t["btn_close"])
 
         def _update_whisper_fields(*_):
@@ -431,6 +437,11 @@ class SettingsWindow:
             btns2, text="Vokabular verwalten", command=self.open_vocabulary
         )
         _btn_vocab.pack(side="left", padx=4)
+        _btn_prompt = ttk.Button(
+            btns2, text="LLM-Prompt bearbeiten", command=self.open_prompt_editor
+        )
+        _btn_prompt.pack(side="left", padx=4)
+        _btn_prompt_ref[0] = _btn_prompt
         _btn_close = ttk.Button(btns2, text="Schließen", command=self.win.destroy)
         _btn_close.pack(side="left", padx=4)
 
@@ -530,6 +541,7 @@ class SettingsWindow:
             return
 
         save_config(DEFAULT_CONFIG)
+        save_system_prompt(_DEFAULT_SYSTEM_PROMPT)
         self.app.reload_config()
 
         self.url_var.set(DEFAULT_CONFIG["whisper_url"])
@@ -726,6 +738,122 @@ class SettingsWindow:
         # Edit-Modus-Buttons (zunächst unsichtbar)
         btn_save = ttk.Button(btns, text="Speichern", command=_save_edit)
         btn_cancel = ttk.Button(btns, text="Abbrechen", command=_exit_edit_mode)
+
+    def open_prompt_editor(self):
+        if not self.win or not self.win.winfo_exists():
+            return
+        pwin = tk.Toplevel(self.win)
+        pwin.title("LLM-Prompt & Parameter")
+        _center_on_target(pwin, 560, 580)
+        pwin.resizable(True, True)
+        pwin.attributes("-topmost", True)
+
+        frm = ttk.Frame(pwin, padding=10)
+        frm.pack(fill="both", expand=True)
+        frm.columnconfigure(0, weight=1)
+        frm.rowconfigure(1, weight=1)
+
+        ttk.Label(frm, text="System-Prompt:").grid(
+            row=0, column=0, sticky="w", pady=(0, 4)
+        )
+
+        txt_frm = ttk.Frame(frm)
+        txt_frm.grid(row=1, column=0, sticky="nsew", pady=(0, 8))
+        txt_frm.columnconfigure(0, weight=1)
+        txt_frm.rowconfigure(0, weight=1)
+
+        txt = tk.Text(txt_frm, wrap="word", width=62, height=18, undo=True)
+        txt.grid(row=0, column=0, sticky="nsew")
+        vsb = ttk.Scrollbar(txt_frm, orient="vertical", command=txt.yview)
+        vsb.grid(row=0, column=1, sticky="ns")
+        txt.configure(yscrollcommand=vsb.set)
+        txt.insert("1.0", load_system_prompt())
+
+        # ── Modell-Parameter ──────────────────────────────
+        params = ttk.LabelFrame(frm, text=" Modell-Parameter ", padding=(8, 4))
+        params.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        params.columnconfigure(1, weight=1)
+        params.columnconfigure(3, weight=1)
+
+        cfg = load_config()
+        temp_var = tk.StringVar(value=str(cfg.get("temperature", 0)))
+        top_p_var = tk.StringVar(value=str(cfg.get("top_p", 1)))
+        max_tokens_var = tk.StringVar(value=str(cfg.get("max_tokens", 220)))
+        num_ctx_var = tk.StringVar(value=str(cfg.get("num_ctx", 1024)))
+
+        ttk.Label(params, text="Temperature").grid(
+            row=0, column=0, sticky="e", padx=(0, 6), pady=2
+        )
+        ttk.Entry(params, textvariable=temp_var, width=8).grid(
+            row=0, column=1, sticky="w", pady=2
+        )
+        ttk.Label(params, text="Top-p").grid(
+            row=0, column=2, sticky="e", padx=(12, 6), pady=2
+        )
+        ttk.Entry(params, textvariable=top_p_var, width=8).grid(
+            row=0, column=3, sticky="w", pady=2
+        )
+        ttk.Label(params, text="Max Tokens").grid(
+            row=1, column=0, sticky="e", padx=(0, 6), pady=2
+        )
+        ttk.Entry(params, textvariable=max_tokens_var, width=8).grid(
+            row=1, column=1, sticky="w", pady=2
+        )
+        ttk.Label(params, text="Context (num_ctx)").grid(
+            row=1, column=2, sticky="e", padx=(12, 6), pady=2
+        )
+        ttk.Entry(params, textvariable=num_ctx_var, width=8).grid(
+            row=1, column=3, sticky="w", pady=2
+        )
+
+        # ── Buttons ────────────────────────────────────
+        btns = ttk.Frame(frm)
+        btns.grid(row=3, column=0, sticky="ew")
+
+        def _save():
+            save_system_prompt(txt.get("1.0", "end-1c"))
+            c = load_config()
+            try:
+                c["temperature"] = float(temp_var.get())
+            except ValueError:
+                pass
+            try:
+                c["top_p"] = float(top_p_var.get())
+            except ValueError:
+                pass
+            try:
+                c["max_tokens"] = int(max_tokens_var.get())
+                c["num_predict"] = c["max_tokens"]
+            except ValueError:
+                pass
+            try:
+                c["num_ctx"] = int(num_ctx_var.get())
+            except ValueError:
+                pass
+            save_config(c)
+            self.app.reload_config()
+            messagebox.showinfo("LLM-Prompt", "Gespeichert.", parent=pwin)
+
+        def _reset():
+            if messagebox.askyesno(
+                "Standard wiederherstellen",
+                "System-Prompt und Parameter auf Standardwerte zurücksetzen?",
+                parent=pwin,
+            ):
+                txt.delete("1.0", "end")
+                txt.insert("1.0", _DEFAULT_SYSTEM_PROMPT)
+                temp_var.set(str(DEFAULT_CONFIG["temperature"]))
+                top_p_var.set(str(DEFAULT_CONFIG["top_p"]))
+                max_tokens_var.set(str(DEFAULT_CONFIG["max_tokens"]))
+                num_ctx_var.set(str(DEFAULT_CONFIG["num_ctx"]))
+
+        ttk.Button(btns, text="Speichern", command=_save).pack(side="left", padx=(0, 4))
+        ttk.Button(btns, text="Standard wiederherstellen", command=_reset).pack(
+            side="left", padx=4
+        )
+        ttk.Button(btns, text="Schließen", command=pwin.destroy).pack(
+            side="left", padx=4
+        )
 
     def test_microphone(self):
         if self._testing:

@@ -2,11 +2,12 @@ import ctypes
 import queue
 import sys
 import threading
+import time
 from tkinter import messagebox
 
-from config import Config, load_config
-from correction_tracker import CorrectionTracker
-from hotkey import HotkeyManager
+import keyboard
+
+from config import Config, auto_elevate_if_needed, load_config
 from llm_corrector import LLMCorrector
 from recorder import Recorder
 from text_inserter import TextInserter
@@ -14,12 +15,16 @@ from tray import Tray
 from ui.overlay import Overlay
 from ui.popups import _MicLevelPopup
 from ui.settings_window import SettingsWindow
+from ui.translations import t
 from vocabulary import VocabularyManager
 from whisper_client import WhisperClient
 
 
 class App:
     def __init__(self):
+        raw_cfg = load_config()
+        auto_elevate_if_needed(raw_cfg)
+
         self.config = Config()
         self.overlay = Overlay()
         self.recorder = Recorder(self.config)
@@ -29,14 +34,12 @@ class App:
         self.llm = LLMCorrector(self.config)
         self.settings = SettingsWindow(self)
         self.tray = Tray(self)
-        self._hotkey = HotkeyManager(self.overlay.root)
 
         self.is_recording = False
         self.is_busy = False
         self.event_queue = queue.Queue()
         self.running = True
         self._rec_popup: _MicLevelPopup | None = None
-        self._correction_tracker: CorrectionTracker | None = None
 
     def reload_config(self):
         self.config.reload()
@@ -45,28 +48,41 @@ class App:
         self.inserter = TextInserter(self.config)
         self.llm = LLMCorrector(self.config)
         self.overlay.update_language(self.config.language)
-        # Re-register hotkey with potentially new key combo
-        self._register_hotkey()
-
-    def _register_hotkey(self) -> None:
-        try:
-            self._hotkey.register(
-                self.config.hotkey_keys,
-                on_press=lambda: self.event_queue.put("start"),
-                on_release=lambda: self.event_queue.put("stop"),
-            )
-        except OSError as e:
-            from tkinter import messagebox as _mb
-
-            _mb.showwarning(
-                "Hotkey",
-                f"Hotkey konnte nicht registriert werden:\n{e}",
-                parent=self.overlay.root,
-            )
 
     def hotkey_pressed(self):
-        # Kept for backwards-compat; always False now (RegisterHotKey handles it).
-        return False
+        _ALIASES = {"left windows": "linke windows", "linke windows": "left windows"}
+
+        def is_key_pressed(k):
+            try:
+                if keyboard.is_pressed(k):
+                    return True
+            except Exception:
+                pass
+            try:
+                if keyboard.is_pressed(_ALIASES.get(k.lower(), k)):
+                    return True
+            except Exception:
+                pass
+            return False
+
+        try:
+            return all(is_key_pressed(k) for k in self.config.hotkey_keys)
+        except Exception:
+            return False
+
+    def monitor_hotkey(self):
+        was_pressed = False
+        while self.running:
+            pressed = self.hotkey_pressed()
+
+            if pressed and not was_pressed:
+                self.event_queue.put("start")
+
+            if not pressed and was_pressed:
+                self.event_queue.put("stop")
+
+            was_pressed = pressed
+            time.sleep(0.03)
 
     def process_events(self):
         try:
@@ -90,10 +106,6 @@ class App:
         if self.is_recording or self.is_busy:
             return
 
-        if self._correction_tracker:
-            self._correction_tracker.stop()
-            self._correction_tracker = None
-
         try:
             self.is_recording = True
             self.recorder.start()
@@ -110,7 +122,7 @@ class App:
         except Exception as e:
             self.is_recording = False
             self._rec_popup = None
-            self.overlay.show(f"Fehler: {e}")
+            self.overlay.show(f'{t("msg_error", self.config.language)}: {e}')
             self.overlay.root.after(2500, self.overlay.hide)
 
     def stop_recording(self):
@@ -153,22 +165,25 @@ class App:
                 text = self.vocab.apply(text)
                 text = self.llm.correct(text)
                 self.inserter.insert_text(text)
-                self._correction_tracker = CorrectionTracker(self.vocab)
-                self._correction_tracker.start(
-                    text,
-                    self.overlay.root.after,
-                    self._on_correction_saved,
-                )
             else:
+                lang = self.config.language
                 messagebox.showinfo(
-                    "Ergebnis", "Keine Sprache erkannt.", parent=self.overlay.root
+                    t("msg_result_title", lang),
+                    t("msg_no_speech", lang),
+                    parent=self.overlay.root,
                 )
 
         except Exception as e:
             if self._rec_popup:
                 self.overlay.root.after(0, self._rec_popup.close)
                 self._rec_popup = None
-            self.overlay.show(f"Fehler: {e}")
+            lang = self.config.language
+            err_msg = (
+                t("msg_no_audio", lang)
+                if str(e) == "no_audio"
+                else f'{t("msg_error", lang)}: {e}'
+            )
+            self.overlay.show(err_msg)
 
         finally:
             if audio_path and audio_path.exists():
@@ -179,10 +194,6 @@ class App:
             self.is_busy = False
             self.overlay.root.after(1500, self.overlay.hide)
 
-    def _on_correction_saved(self, msg: str) -> None:
-        self.overlay.show(msg)
-        self.overlay.root.after(2000, self.overlay.hide)
-
     def open_settings(self):
         self.event_queue.put("settings")
 
@@ -191,7 +202,6 @@ class App:
 
     def _quit_mainthread(self):
         self.running = False
-        self._hotkey.unregister()
         try:
             self.tray.stop()
         except Exception:
@@ -200,7 +210,7 @@ class App:
         self.overlay.root.destroy()
 
     def run(self):
-        self._register_hotkey()
+        threading.Thread(target=self.monitor_hotkey, daemon=True).start()
         threading.Thread(target=self.tray.run, daemon=True).start()
         self.overlay.root.after(50, self.process_events)
         self.overlay.loop()

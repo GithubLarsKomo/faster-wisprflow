@@ -44,8 +44,14 @@ class LLMCorrector:
         headers = {"Content-Type": "application/json"}
         if self.config.correction_token:
             headers["Authorization"] = f"Bearer {self.config.correction_token}"
-        system_prompt = self.config.system_prompt.strip()
-        user_prompt = text.replace("{{language}}", self.config.language).strip()
+        system_prompt = self.config.system_prompt.strip().replace(
+            "{{language}}", self.config.language
+        )
+        user_prompt = (
+            f"<text_to_correct>\n"
+            f"{text.strip().replace('{{language}}', self.config.language)}\n"
+            f"</text_to_correct>"
+        )
         payload = {
             "model": self.config.correction_model,
             "messages": [
@@ -58,6 +64,17 @@ class LLMCorrector:
             "stream": False,
         }
         return headers, payload
+
+    @staticmethod
+    def _looks_like_correction(original: str, result: str) -> bool:
+        """Return False if result looks like a meta-response rather than a corrected text."""
+        orig_words = original.split()
+        if not orig_words:
+            return True
+        # A correction should not be dramatically longer than the original
+        if len(result.split()) > len(orig_words) * 3 + 15:
+            return False
+        return True
 
     def probe(self, text: str) -> str:
         """Like correct(), but raises on any HTTP or API error (used for testing)."""
@@ -95,6 +112,14 @@ class LLMCorrector:
             )
             resp.raise_for_status()
             result = resp.json()["choices"][0]["message"]["content"].strip()
-            return result if result else text
+            # Strip XML tags echoed back by some models
+            result = (
+                result.removeprefix("<text_to_correct>")
+                .removesuffix("</text_to_correct>")
+                .strip()
+            )
+            if result and self._looks_like_correction(text, result):
+                return result
+            return text
         except Exception:
             return text

@@ -12,6 +12,7 @@ else:
     CONFIG_PATH = BASE_DIR / "config.json"
 
 VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
+PROMPT_PATH = CONFIG_PATH.parent / "system_prompt.txt"
 
 _DEFAULT_SYSTEM_PROMPT = "\n".join(
     [
@@ -26,6 +27,8 @@ _DEFAULT_SYSTEM_PROMPT = "\n".join(
         "offensichtliche Speech-to-Text Fehler",
         "Umlaute in der ISO-Sprache {{language}}",
         "Satzstruktur bei Diktatfragmenten",
+        "Selbstkorrekturen des Sprechers: Wenn der Sprecher sich selbst korrigiert (erkennbar an Wörtern wie 'nein', 'also', 'ich meine', 'beziehungsweise', 'äh nein'), behalte ausschließlich die zuletzt genannte Fassung (Beispiel: 'drei, nein, vier Flaschen' → 'vier Flaschen')",
+        "Füllwörter wie äh, ähm etc., wenn sie offensichtlich fehl am Platz sind",
         "",
         "REGELN:",
         "",
@@ -40,6 +43,27 @@ _DEFAULT_SYSTEM_PROMPT = "\n".join(
         "Keine Erklärungen",
     ]
 )
+
+
+def load_system_prompt(config_data: dict | None = None) -> str:
+    """Return the LLM system prompt.
+
+    Priority: ``system_prompt.txt`` on disk → *config_data*[``system_prompt``]
+    (migration path from JSON) → built-in default.
+    """
+    if PROMPT_PATH.exists():
+        try:
+            return PROMPT_PATH.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    if config_data and "system_prompt" in config_data:
+        return config_data["system_prompt"]
+    return _DEFAULT_SYSTEM_PROMPT
+
+
+def save_system_prompt(text: str) -> None:
+    """Persist the LLM system prompt to ``system_prompt.txt``."""
+    PROMPT_PATH.write_text(text, encoding="utf-8")
 
 
 def _resource(filename: str) -> Path:
@@ -80,7 +104,6 @@ DEFAULT_CONFIG = {
     "num_ctx": 1024,
     "repeat_penalty": 1.0,
     "max_tokens": 220,
-    "system_prompt": _DEFAULT_SYSTEM_PROMPT,
     "proxy": "",
 }
 
@@ -163,5 +186,5 @@ class Config:
         self.num_ctx = data.get("num_ctx", 1024)
         self.repeat_penalty = data.get("repeat_penalty", 1.0)
         self.max_tokens = data.get("max_tokens", 220)
-        self.system_prompt = data.get("system_prompt", _DEFAULT_SYSTEM_PROMPT)
+        self.system_prompt = load_system_prompt(data)
         self.proxy = data.get("proxy", "")

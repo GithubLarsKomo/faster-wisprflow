@@ -38,6 +38,25 @@ KEYEVENTF_KEYUP = 0x0002
 _u32 = ctypes.windll.user32
 _k32 = ctypes.windll.kernel32
 
+# Fix 64-bit handle/pointer truncation on 64-bit Windows.
+# ctypes defaults restype=c_int (32-bit) and argtypes=None (defaults to c_int).
+# Handles / pointers returned or accepted by these functions can exceed 2 GB,
+# so both restype AND argtypes must be declared with c_void_p / c_size_t.
+_k32.GlobalAlloc.restype = ctypes.c_void_p
+_k32.GlobalAlloc.argtypes = [wt.UINT, ctypes.c_size_t]
+_k32.GlobalLock.restype = ctypes.c_void_p
+_k32.GlobalLock.argtypes = [ctypes.c_void_p]
+_k32.GlobalUnlock.restype = ctypes.c_bool
+_k32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+_k32.OpenProcess.restype = ctypes.c_void_p
+_k32.OpenProcess.argtypes = [wt.DWORD, wt.BOOL, wt.DWORD]
+_k32.CloseHandle.restype = ctypes.c_bool
+_k32.CloseHandle.argtypes = [ctypes.c_void_p]
+_u32.GetClipboardData.restype = ctypes.c_void_p
+_u32.GetClipboardData.argtypes = [wt.UINT]
+_u32.SetClipboardData.restype = ctypes.c_void_p
+_u32.SetClipboardData.argtypes = [wt.UINT, ctypes.c_void_p]
+
 
 class _KEYBDINPUT(ctypes.Structure):
     _fields_ = [
@@ -50,7 +69,12 @@ class _KEYBDINPUT(ctypes.Structure):
 
 
 class _INPUT_UNION(ctypes.Union):
-    _fields_ = [("ki", _KEYBDINPUT)]
+    _fields_ = [
+        ("ki", _KEYBDINPUT),
+        # Pad to MOUSEINPUT size (32 bytes) so _INPUT matches the real Win32
+        # INPUT struct (40 bytes on 64-bit). SendInput checks cbSize strictly.
+        ("_pad", ctypes.c_byte * 32),
+    ]
 
 
 class _INPUT(ctypes.Structure):
