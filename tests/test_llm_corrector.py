@@ -139,21 +139,23 @@ class TestCorrect:
             result = llm.correct("original text")
         assert result == "Corrected text"
 
-    def test_returns_original_on_http_error(self):
+    def test_raises_on_http_error(self):
         llm = self._make()
         with patch(
             "llm_corrector.requests.post",
             side_effect=requests.HTTPError("500"),
         ):
-            assert llm.correct("original") == "original"
+            with pytest.raises(requests.HTTPError):
+                llm.correct("original")
 
-    def test_returns_original_on_connection_error(self):
+    def test_raises_on_connection_error(self):
         llm = self._make()
         with patch(
             "llm_corrector.requests.post",
             side_effect=requests.ConnectionError(),
         ):
-            assert llm.correct("original") == "original"
+            with pytest.raises(requests.ConnectionError):
+                llm.correct("original")
 
     def test_returns_original_when_response_empty(self):
         llm = self._make()
@@ -186,9 +188,11 @@ class TestProbe:
     def test_raises_on_http_error(self):
         llm = self._make()
         mock_resp = MagicMock()
-        mock_resp.raise_for_status.side_effect = requests.HTTPError("401")
+        mock_resp.ok = False
+        mock_resp.status_code = 401
+        mock_resp.text = "Unauthorized"
         with patch("llm_corrector.requests.post", return_value=mock_resp):
-            with pytest.raises(requests.HTTPError):
+            with pytest.raises(RuntimeError, match="HTTP 401"):
                 llm.probe("test")
 
     def test_raises_on_api_error_in_body(self):

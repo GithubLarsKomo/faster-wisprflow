@@ -6,6 +6,7 @@ import time
 from tkinter import messagebox
 
 import keyboard
+import mouse
 
 from config import Config, auto_elevate_if_needed, load_config
 from llm_corrector import LLMCorrector
@@ -47,7 +48,12 @@ class App:
         self.client = WhisperClient(self.config)
         self.inserter = TextInserter(self.config)
         self.llm = LLMCorrector(self.config)
-        self.overlay.update_language(self.config.language)
+        self.overlay.update_language(self.config.ui_language)
+        if self._rec_popup:
+            self.overlay.root.after(
+                0,
+                lambda: self._rec_popup.set_llm_enabled(self.config.correction_enabled),
+            )
 
     def hotkey_pressed(self):
         _ALIASES = {"left windows": "linke windows", "linke windows": "left windows"}
@@ -73,7 +79,7 @@ class App:
     def monitor_hotkey(self):
         was_pressed = False
         while self.running:
-            pressed = self.hotkey_pressed()
+            pressed = self.hotkey_pressed() or mouse.is_pressed(button="middle")
 
             if pressed and not was_pressed:
                 self.event_queue.put("start")
@@ -109,21 +115,30 @@ class App:
         try:
             self.is_recording = True
             self.recorder.start()
-            self._rec_popup = _MicLevelPopup(
-                self.overlay.root, llm_enabled=self.config.correction_enabled
-            )
 
-            def _poll_rms():
-                if self.is_recording and self._rec_popup:
-                    self._rec_popup.set_rms(self.recorder.last_rms)
-                    self.overlay.root.after(50, _poll_rms)
+            def _start_popup():
+                if not self.is_recording:
+                    return
+                if self._rec_popup:
+                    self._rec_popup.set_recording(on_timeout=self.stop_recording)
 
-            self.overlay.root.after(50, _poll_rms)
-        except Exception as e:
+                def _poll_rms():
+                    if self.is_recording and self._rec_popup:
+                        self._rec_popup.set_rms(self.recorder.last_rms)
+                        self.overlay.root.after(50, _poll_rms)
+
+                self.overlay.root.after(50, _poll_rms)
+
+            self.overlay.root.after(100, _start_popup)
+        except Exception:
             self.is_recording = False
-            self._rec_popup = None
-            self.overlay.show(f'{t("msg_error", self.config.language)}: {e}')
-            self.overlay.root.after(2500, self.overlay.hide)
+            # reset recorder internal state so a later attempt starts clean
+            try:
+                self.recorder.recording = False
+            except Exception:
+                pass
+            if self._rec_popup:
+                self.overlay.root.after(0, self._rec_popup.set_idle)
 
     def stop_recording(self):
         if not self.is_recording:
@@ -157,16 +172,12 @@ class App:
             audio_path = self.recorder.stop()
             text = self.client.transcribe(audio_path)
 
-            if self._rec_popup:
-                self.overlay.root.after(0, self._rec_popup.close)
-                self._rec_popup = None
-
             if text:
                 text = self.vocab.apply(text)
                 text = self.llm.correct(text)
                 self.inserter.insert_text(text)
             else:
-                lang = self.config.language
+                lang = self.config.ui_language
                 messagebox.showinfo(
                     t("msg_result_title", lang),
                     t("msg_no_speech", lang),
@@ -174,16 +185,10 @@ class App:
                 )
 
         except Exception as e:
-            if self._rec_popup:
-                self.overlay.root.after(0, self._rec_popup.close)
-                self._rec_popup = None
-            lang = self.config.language
-            err_msg = (
-                t("msg_no_audio", lang)
-                if str(e) == "no_audio"
-                else f'{t("msg_error", lang)}: {e}'
-            )
-            self.overlay.show(err_msg)
+            if str(e) != "no_audio":
+                lang = self.config.ui_language
+                err_msg = f'{t("msg_error", lang)}: {e}'
+                self.overlay.root.after(0, lambda m=err_msg: self.overlay.show(m))
 
         finally:
             if audio_path and audio_path.exists():
@@ -192,7 +197,8 @@ class App:
                 except Exception:
                     pass
             self.is_busy = False
-            self.overlay.root.after(1500, self.overlay.hide)
+            if self._rec_popup:
+                self.overlay.root.after(0, self._rec_popup.set_idle)
 
     def open_settings(self):
         self.event_queue.put("settings")
@@ -213,7 +219,15 @@ class App:
         threading.Thread(target=self.monitor_hotkey, daemon=True).start()
         threading.Thread(target=self.tray.run, daemon=True).start()
         self.overlay.root.after(50, self.process_events)
+        self.overlay.root.after(0, self._create_idle_popup)
         self.overlay.loop()
+
+    def _create_idle_popup(self) -> None:
+        self._rec_popup = _MicLevelPopup(
+            self.overlay.root,
+            llm_enabled=self.config.correction_enabled,
+            idle=True,
+        )
 
 
 if __name__ == "__main__":

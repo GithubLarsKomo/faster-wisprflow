@@ -86,7 +86,8 @@ class LLMCorrector:
             headers=headers,
             proxies=self._proxies(),
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            raise RuntimeError(f"HTTP {resp.status_code} — {resp.text}")
         data = resp.json()
         if "error" in data:
             err = data["error"]
@@ -95,31 +96,29 @@ class LLMCorrector:
         choices = data.get("choices") or []
         if not choices:
             raise ValueError(f"Empty response from API: {data}")
-        result = choices[0]["message"]["content"].strip()
+        result = (choices[0]["message"]["content"] or "").strip()
         return result
 
     def correct(self, text: str) -> str:
         if not self.config.correction_enabled or not text.strip():
             return text
-        try:
-            headers, payload = self._build_payload(text)
-            resp = requests.post(
-                self._chat_url(),
-                json=payload,
-                timeout=30,
-                headers=headers,
-                proxies=self._proxies(),
-            )
-            resp.raise_for_status()
-            result = resp.json()["choices"][0]["message"]["content"].strip()
-            # Strip XML tags echoed back by some models
-            result = (
-                result.removeprefix("<text_to_correct>")
-                .removesuffix("</text_to_correct>")
-                .strip()
-            )
-            if result and self._looks_like_correction(text, result):
-                return result
-            return text
-        except Exception:
-            return text
+        headers, payload = self._build_payload(text)
+        resp = requests.post(
+            self._chat_url(),
+            json=payload,
+            timeout=30,
+            headers=headers,
+            proxies=self._proxies(),
+        )
+        if not resp.ok:
+            raise RuntimeError(f"HTTP {resp.status_code} — {resp.text}")
+        result = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        # Strip XML tags echoed back by some models
+        result = (
+            result.removeprefix("<text_to_correct>")
+            .removesuffix("</text_to_correct>")
+            .strip()
+        )
+        if result and self._looks_like_correction(text, result):
+            return result
+        return text

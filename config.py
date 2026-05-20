@@ -83,6 +83,7 @@ DEFAULT_CONFIG = {
     "whisper_endpoint": "transcribe",
     "health_endpoint": "health",
     "language": "de",
+    "ui_language": "de",
     "response_format": "text",
     "sample_rate": 16000,
     "channels": 1,
@@ -165,6 +166,7 @@ class Config:
         self.whisper_endpoint = data.get("whisper_endpoint", "/transcribe")
         self.health_endpoint = data.get("health_endpoint", "/health")
         self.language = data["language"]
+        self.ui_language = data.get("ui_language", "de")
         self.response_format = data["response_format"]
         self.sample_rate = int(data["sample_rate"])
         self.channels = int(data["channels"])
