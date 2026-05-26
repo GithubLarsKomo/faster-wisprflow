@@ -1,147 +1,143 @@
 # FlüsterFee
 
-> Push-to-talk Spracheingabe für Windows — Hotkey halten → sprechen → loslassen → Text wird automatisch an der Cursorposition eingefügt.
+Push-to-talk Spracheingabe fuer Windows: Hotkey halten -> sprechen -> loslassen -> Text wird automatisch an der Cursorposition eingefuegt.
 
----
-
-## Funktionsübersicht
+## Funktionsuebersicht
 
 | Feature | Details |
 |---|---|
-| **Hotkey-Diktat** | Hotkey gedrückt halten = aufnehmen, loslassen = transkribieren & einfügen |
-| **Animiertes Popup** | Pill-förmiges Overlay mit Pegelbalken (Aufnahme) / Punkte-Animation (Transkription) |
-| **Transkription** | Lokaler Whisper-Server, Groq oder OpenRouter |
-| **LLM-Korrektur** | Ollama, Groq oder OpenRouter — korrigiert Rechtschreibung, Zeichensetzung, Sprachfehler |
-| **Vokabular** | Wort-Ersetzungen aus `vocabulary.json`, verwaltbar über das Einstellungsfenster |
-| **Proxy-Support** | Optionaler HTTP-Proxy für alle ausgehenden Anfragen |
-| **Mehrsprachige UI** | de · en · fr · es · zh · pt · pl · it |
-| **System-Tray** | Läuft im Hintergrund, Rechtsklick für Menü |
-| **Portabel** | Einzelne EXE + `config.json` — keine Installation nötig |
-
----
+| Hotkey-Diktat | Hotkey gedrueckt halten = aufnehmen, loslassen = transkribieren und einfuegen |
+| Animiertes Popup | Pill-Overlay mit Pegelbalken (Aufnahme) und Punkte-Animation (Transkription) |
+| Transkription | Lokaler Whisper-Endpunkt, Groq oder OpenRouter |
+| Transkriptions-Guidance | Optionales Prompting + Normalisierung fuer Satzzeichen/Befehle |
+| Editierbarer Initial Prompt | Eigener Prompt fuer Transkription in den Einstellungen, persistiert in Datei |
+| LLM-Korrektur | Ollama, Groq oder OpenRouter fuer Textkorrektur |
+| Vokabular | Ersetzungen aus `vocabulary.json`, im UI verwaltbar |
+| Cursor-Kontext-Grossschreibung | Optional: erster Buchstabe wird am Cursor-Kontext ausgerichtet |
+| Mehrsprachige UI | de, en, fr, es, zh, pt, pl, it |
+| Proxy-Support | Optionaler HTTP-Proxy fuer ausgehende Requests |
+| System-Tray | Laeuft im Hintergrund mit Tray-Menue |
 
 ## Voraussetzungen
 
-- **Windows 10 / 11**
-- Einen laufenden Whisper-Endpunkt — z. B. [`faster-whisper-server`](https://github.com/fedirz/faster-whisper-server) lokal, oder einen Account bei [Groq](https://groq.com) / [OpenRouter](https://openrouter.ai)
-- Python 3.12+ mit [uv](https://github.com/astral-sh/uv) — nur für die Entwicklung
-
----
+- Windows 10/11
+- Laufender Whisper-Endpunkt (lokal) oder Zugang zu Groq/OpenRouter
+- Python 3.12+ mit `uv` (nur fuer Entwicklung)
 
 ## Schnellstart (EXE)
 
 1. `FlüsterFee.exe` und `config.json` in denselben Ordner legen.
-2. `config.json` öffnen und mindestens `whisper_url` / `port` sowie den gewünschten Hotkey eintragen.
-3. EXE starten — das Icon erscheint im System-Tray.
-4. Hotkey gedrückt halten, sprechen, loslassen — fertig.
+2. `config.json` mindestens fuer Whisper-URL/Port und Hotkey konfigurieren.
+3. EXE starten, ueber Tray/Einstellungen Feintuning vornehmen.
 
-> **Tipp:** `system_prompt.txt` neben die EXE legen, um den LLM-Prompt dauerhaft anzupassen, ohne die Einstellungen zu öffnen.
+Optionale Prompt-Dateien neben der EXE:
 
----
+- `system_prompt.txt` fuer LLM-Korrektur
+- `transcription_initial_prompt.txt` fuer Transkriptions-Initial-Prompt
 
 ## Konfiguration (`config.json`)
 
 ### Allgemein
 
-| Schlüssel | Standard | Beschreibung |
+| Schluessel | Standard | Beschreibung |
 |---|---|---|
-| `hotkey_keys` | `["ctrl", "linke windows"]` | Hotkey-Kombination (gedrückt halten zum Aufnehmen) |
-| `language` | `"de"` | Zielsprache (ISO-639-1) — beeinflusst Transkription und LLM-Prompt |
-| `ui_language` | `"de"` | Sprache der Benutzeroberfläche (`de` · `en` · `fr` · `es` · `zh` · `pt` · `pl` · `it`) |
-| `restore_clipboard` | `true` | Clipboard-Inhalt nach dem Einfügen wiederherstellen |
-| `auto_elevate` | `true` | Beim Start automatisch Administratorrechte anfordern |
-| `proxy` | `""` | HTTP-Proxy-URL (leer = kein Proxy) |
+| `hotkey_keys` | `['ctrl', 'linke windows']` | Hotkey-Kombination |
+| `language` | `'de'` | Zielsprache (ISO-639-1) |
+| `ui_language` | `'de'` | UI-Sprache |
+| `restore_clipboard` | `true` | Clipboard nach Einfuegen wiederherstellen |
+| `auto_elevate` | `true` | Beim Start Admin-Rechte anfordern |
+| `proxy` | `''` | HTTP-Proxy-URL (leer = kein Proxy) |
 
-> `hotkey_keys` akzeptiert sowohl `"left windows"` als auch `"linke windows"`.
+### Audio
+
+| Schluessel | Standard | Beschreibung |
+|---|---|---|
+| `sample_rate` | `16000` | Abtastrate in Hz |
+| `channels` | `1` | Audiokanaele |
+| `max_recording` | `60` | Maximale Aufnahmezeit pro Aufnahme (Sekunden) |
+| `input_device` | `null` | Mikrofon-Index (`null` = System-Standard) |
 
 ### Whisper-Transkription
 
-| Schlüssel | Standard | Beschreibung |
+| Schluessel | Standard | Beschreibung |
 |---|---|---|
-| `whisper_provider` | `"lokal"` | `"lokal"`, `"Openrouter"` oder `"Groq"` |
-| `whisper_url` | `"http://10.4.190.16"` | Basis-URL des Whisper-Servers (nur lokal) |
-| `port` | `8009` | Port (0 oder leer = keinen Port anhängen) |
-| `whisper_endpoint` | `"transcribe"` | Endpunkt-Pfad |
-| `health_endpoint` | `"health"` | Health-Check-Endpunkt |
-| `whisper_model` | `"whisper-large-v3-turbo"` | Modellname (für Openrouter/Groq) |
-| `whisper_token` | `""` | Bearer-Token (Openrouter/Groq) |
-| `response_format` | `"text"` | `"text"` oder `"json"` |
-| `sample_rate` | `16000` | Abtastrate in Hz |
-| `channels` | `1` | Audiokanäle (1 = Mono) |
-| `input_device` | `null` | Mikrofon-Index (`null` = System-Standard) |
+| `whisper_provider` | `'lokal'` | `'lokal'`, `'Openrouter'`, `'Groq'` |
+| `whisper_url` | `'http://10.4.190.16'` | Basis-URL (lokal) |
+| `port` | `8009` | Port (0/leer = kein Portanhaengen) |
+| `whisper_endpoint` | `'transcribe'` | Endpunkt-Pfad |
+| `health_endpoint` | `'health'` | Health-Check-Endpunkt |
+| `whisper_model` | `'whisper-large-v3-turbo'` | Modellname |
+| `whisper_token` | `''` | Bearer-Token (Cloud-Provider) |
+| `response_format` | `'text'` | `'text'` oder `'json'` |
+| `transcription_guidance_enabled` | `false` | Aktiviert Guidance inkl. Initial Prompt |
 
 ### LLM-Korrektur
 
-| Schlüssel | Standard | Beschreibung |
+| Schluessel | Standard | Beschreibung |
 |---|---|---|
 | `correction_enabled` | `true` | LLM-Korrektur aktivieren |
-| `llm_provider` | `"Ollama"` | `"Ollama"`, `"Openrouter"` oder `"Groq"` |
-| `correction_url` | `"http://10.4.190.16"` | Basis-URL des LLM-Servers (nur Ollama) |
-| `correction_port` | `11434` | Port des LLM-Servers (nur Ollama) |
-| `correction_model` | `"hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M"` | Modellname |
-| `correction_token` | `""` | Bearer-Token (Openrouter/Groq) |
+| `llm_provider` | `'Ollama'` | `'Ollama'`, `'Openrouter'`, `'Groq'` |
+| `correction_url` | `'http://10.4.190.16'` | Basis-URL (Ollama) |
+| `correction_port` | `11434` | Port (Ollama) |
+| `correction_model` | `hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M` | Modellname |
+| `correction_token` | `''` | Bearer-Token (Cloud-Provider) |
 | `temperature` | `0` | Sampling-Temperatur |
-| `top_p` | `1` | Top-p-Wert |
-| `max_tokens` | `220` | Maximale Ausgabelänge in Tokens |
-| `num_ctx` | `1024` | Kontextfenstergröße (Ollama: `num_ctx`) |
+| `top_p` | `1` | Top-p |
+| `max_tokens` | `220` | Maximale Ausgabelaenge |
+| `num_ctx` | `1024` | Kontextfenster |
 
----
+## Prompt-Dateien
 
-## LLM-Korrektur
+### LLM-System-Prompt
 
-Der transkribierte Text wird an einen OpenAI-kompatiblen Chat-Endpunkt gesendet und der korrigierte Text zurückgegeben. Schlägt der LLM-Aufruf fehl, wird der Originaltext unverändert eingefügt.
+- Datei: `system_prompt.txt`
+- Platzhalter: `{{language}}`
+- Kann im Fenster LLM-Korrektur bearbeitet und auf Standard zurueckgesetzt werden.
 
-### System-Prompt
+### Transkriptions-Initial-Prompt
 
-Der Prompt wird aus `system_prompt.txt` geladen (neben `config.json`). Existiert die Datei nicht, wird der eingebaute Standardprompt verwendet. Über **Einstellungen → LLM-Korrektur… → Standard wiederherstellen** lässt sich der Prompt jederzeit auf den Werkswert zurücksetzen.
+- Datei: `transcription_initial_prompt.txt`
+- Wird bei aktivierter Transkriptions-Guidance verwendet.
+- Platzhalter: `{{language}}`
+- Kann im Fenster Transkription bearbeitet und auf Standard zurueckgesetzt werden.
 
-Im Prompt wird `{{language}}` automatisch durch den konfigurierten ISO-Sprachcode ersetzt.
+## Pipeline-Reihenfolge
 
-### Unterstützte Backends
-
-| Provider | Endpunkt |
-|---|---|
-| Ollama (Standard) | `<correction_url>:<correction_port>/v1/chat/completions` |
-| OpenRouter | `https://openrouter.ai/api/v1/chat/completions` |
-| Groq | `https://api.groq.com/openai/v1/chat/completions` |
-
----
-
-## Vokabular
-
-`vocabulary.json` enthält Wort-Ersetzungen, die nach der Transkription und **vor** dem LLM-Aufruf angewendet werden — ideal für Eigennamen oder häufig falsch erkannte Begriffe. Einträge werden über **Einstellungen → Vokabular verwalten** oder direkt in der JSON-Datei gepflegt.
-
-Escape-Sequenzen in Ersetzungswerten werden unterstützt: `\n` = Zeilenumbruch, `\t` = Tabulator.
-
----
+1. Transkription (`WhisperClient`)
+2. Vokabular-Ersetzungen (`VocabularyManager`)
+3. LLM-Korrektur (`LLMCorrector`, falls aktiv)
+4. Einfuegen am Cursor (`TextInserter`)
 
 ## Einstellungsfenster
 
-| Bereich / Button | Funktion |
+| Bereich | Funktion |
 |---|---|
-| **Mikrofon testen** | 3-Sekunden-Aufnahme mit Live-Pegelanzeige |
-| **Transkription…** | Whisper-Provider, URL, Port, Token, Modell, Health-Check |
-| **LLM-Korrektur…** | Provider, URL, Token, Modell, System-Prompt, Modell-Parameter |
-| **Vokabular verwalten** | Einträge ansehen, hinzufügen, bearbeiten und entfernen |
-| **Speichern** | Einstellungen sichern und Hotkey sofort aktualisieren |
+| Mikrofon testen | 3-Sekunden-Aufnahme mit Pegelanzeige |
+| Transkription | Provider, URL, Port, Modell, Token, Guidance-Checkbox, Initial-Prompt-Editor |
+| LLM-Korrektur | Provider, URL, Port, Modell, Token, System-Prompt, Modellparameter |
+| Vokabular verwalten | Eintraege ansehen, hinzufuegen, bearbeiten, entfernen |
+| Speichern | Einstellungen speichern und sofort uebernehmen |
 
----
-
-## Build (EXE erstellen)
+## Build (EXE)
 
 ```powershell
 .venv\Scripts\pyinstaller.exe FlüsterFee.spec
 ```
 
-Die fertige EXE liegt unter `dist\FlüsterFee.exe`. Folgende Dateien müssen **neben** der EXE liegen:
+Die fertige EXE liegt unter `dist\FlüsterFee.exe`. Diese Dateien sollten neben der EXE liegen:
 
 | Datei | Pflicht | Beschreibung |
 |---|---|---|
-| `config.json` | ✅ | Konfiguration |
-| `vocabulary.json` | optional | Wort-Ersetzungen |
-| `system_prompt.txt` | optional | Überschreibt den eingebauten LLM-Prompt |
+| `config.json` | ja | Hauptkonfiguration |
+| `vocabulary.json` | optional | Wort-/Phrasen-Ersetzungen |
+| `system_prompt.txt` | optional | LLM-System-Prompt |
+| `transcription_initial_prompt.txt` | optional | Initial-Prompt fuer Transkription |
 
----
+## Tray-Icon anpassen
+
+1. `tray_icon.png` ins Projektverzeichnis legen (empfohlen 256x256, RGBA)
+2. Optional `tray_icon.ico` fuer EXE-Icon
+3. Neu bauen
 
 ## Entwicklung
 
@@ -150,7 +146,7 @@ uv sync
 uv run python app.py
 ```
 
-Tests ausführen:
+Tests:
 
 ```powershell
 .venv\Scripts\python.exe -m pytest tests/ -q
@@ -158,183 +154,19 @@ Tests ausführen:
 
 ### Projektstruktur
 
-```
-app.py               # Einstiegspunkt
-config.py            # Konfigurationsmodell & Defaults
-recorder.py          # Audioaufnahme (sounddevice)
-whisper_client.py    # Whisper HTTP-Client
-llm_corrector.py     # LLM-Korrektur-Client
-text_inserter.py     # Clipboard-basiertes Texteinfügen
-vocabulary.py        # Vokabular-Manager
-tray.py              # System-Tray-Integration
+```text
+app.py               # Einstiegspunkt und Pipeline
+config.py            # Defaults, Laden/Speichern, Prompt-Dateien
+recorder.py          # Audioaufnahme
+whisper_client.py    # Transkriptions-Client + Guidance
+llm_corrector.py     # LLM-Korrektur
+text_inserter.py     # Clipboard-/Cursor-basiertes Einfuegen
+vocabulary.py        # Vokabular-Ersetzungen
+tray.py              # System-Tray
 ui/
-  overlay.py         # Status-Overlay-Fenster
-  popups.py          # Mic-Level- & LLM-Popup
-  settings_window.py # Einstellungsfenster
-  translations.py    # UI-Übersetzungen (8 Sprachen)
-  utils.py           # Hilfsfunktionen
-```
-
-
-Unterstützt lokale Whisper-Server sowie Cloud-Dienste (Groq, OpenRouter). Optional korrigiert ein lokales oder cloudbasiertes LLM den transkribierten Text automatisch.
-
----
-
-## Features
-
-- **Hotkey-Diktat** — Hotkey halten = aufnehmen, loslassen = transkribieren und einfügen
-- **Animiertes Mic-Level-Popup** — Pill-förmiges Popup mit Pegelbalken während der Aufnahme, Punkte-Animation während der Transkription
-- **LLM-Korrektur** — OpenAI-kompatibler Endpunkt (Ollama, Groq, OpenRouter) korrigiert Rechtschreibung, Zeichensetzung und Sprachfehler; Prompt vollständig anpassbar
-- **Vokabular-Substitution** — Bekannte Wort-Ersetzungen aus `vocabulary.json` werden vor dem Einfügen automatisch angewendet; über das Einstellungsfenster verwaltbar
-- **Multi-Monitor-Unterstützung** — Overlay und Popup erscheinen auf dem mittleren Monitor
-- **System-Tray-Integration** — Läuft im Hintergrund, Rechtsklick für Menü
-- **Admin-Auto-Elevation** — Optional beim Start automatisch Administratorrechte anfordern
-
----
-
-## Voraussetzungen
-
-- Windows 10/11
-- Laufender Whisper-HTTP-Server, z. B. [`faster-whisper-server`](https://github.com/fedirz/faster-whisper-server) (lokal), oder ein Cloud-Dienst (Groq, OpenRouter)
-- Python 3.12+ mit [uv](https://github.com/astral-sh/uv) — nur für die Entwicklung
-
----
-
-## Schnellstart (EXE)
-
-1. `FlüsterFee.exe` und `config.json` in denselben Ordner legen
-2. `config.json` anpassen (Whisper-URL, Mikrofon, Hotkey)
-3. Optional: `system_prompt.txt` neben der EXE ablegen, um den LLM-Prompt zu überschreiben
-4. EXE starten — das Icon erscheint im System-Tray
-
----
-
-## Konfiguration (`config.json`)
-
-### Allgemein
-
-| Schlüssel | Standard | Beschreibung |
-|---|---|---|
-| `hotkey_keys` | `["ctrl", "linke windows"]` | Hotkey-Kombination (gedrückt halten zum Aufnehmen) |
-| `language` | `"de"` | Sprache (ISO-639-1); beeinflusst Transkription und LLM-Prompt |
-| `restore_clipboard` | `true` | Clipboard-Inhalt nach dem Einfügen wiederherstellen |
-| `auto_elevate` | `true` | Beim Start automatisch Administratorrechte anfordern |
-| `proxy` | `""` | HTTP-Proxy-URL (leer = kein Proxy) |
-
-> `hotkey_keys` akzeptiert sowohl `"left windows"` als auch `"linke windows"`.
-
-### Whisper-Transkription
-
-| Schlüssel | Standard | Beschreibung |
-|---|---|---|
-| `whisper_url` | `"http://10.4.190.16"` | Basis-URL des Whisper-Servers |
-| `port` | `8009` | Port (0 oder leer = keinen Port anhängen) |
-| `whisper_provider` | `"lokal"` | `"lokal"`, `"Openrouter"` oder `"Groq"` |
-| `whisper_endpoint` | `"transcribe"` | Endpunkt-Pfad |
-| `whisper_model` | `"whisper-large-v3-turbo"` | Modellname (für Openrouter/Groq) |
-| `whisper_token` | `""` | Bearer-Token (Openrouter/Groq) |
-| `health_endpoint` | `"health"` | Health-Check-Endpunkt |
-| `response_format` | `"text"` | `"text"` oder `"json"` |
-| `sample_rate` | `16000` | Abtastrate in Hz |
-| `channels` | `1` | Audiokanäle (1 = Mono) |
-| `input_device` | `0` | Mikrofon-Index (0 = System-Standard) |
-
-### LLM-Korrektur
-
-| Schlüssel | Standard | Beschreibung |
-|---|---|---|
-| `correction_enabled` | `true` | LLM-Korrektur aktivieren |
-| `correction_url` | `"http://10.4.190.16"` | Basis-URL des LLM-Servers |
-| `correction_port` | `11434` | Port des LLM-Servers |
-| `llm_provider` | `"Ollama"` | `"Ollama"`, `"Openrouter"` oder `"Groq"` |
-| `correction_model` | `"hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M"` | Modellname |
-| `correction_token` | `""` | Bearer-Token (Openrouter/Groq) |
-| `temperature` | `0` | Sampling-Temperatur |
-| `top_p` | `1` | Top-p-Wert |
-| `max_tokens` | `220` | Maximale Ausgabelänge in Tokens |
-| `num_ctx` | `1024` | Kontextfenstergröße (Ollama: `num_ctx`) |
-
----
-
-## LLM-Korrektur
-
-FlüsterFee sendet den transkribierten Text an einen OpenAI-kompatiblen Chat-Endpunkt und gibt den korrigierten Text zurück. Fehler beim LLM-Aufruf werden still ignoriert — der Originaltext wird dann unverändert eingefügt.
-
-### System-Prompt
-
-Der Prompt wird aus `system_prompt.txt` geladen (neben `config.json`). Existiert die Datei nicht, wird der eingebaute Standardprompt verwendet.
-
-**Bearbeiten:**
-
-- Direkt in `system_prompt.txt` (beliebiger Texteditor)
-- Oder über **Einstellungen → LLM-Prompt bearbeiten** in der App
-
-Im Prompt wird `{{language}}` automatisch durch den konfigurierten ISO-Sprachcode ersetzt.
-
-### Unterstützte Backends
-
-| Provider | URL |
-|---|---|
-| Ollama (Standard) | `<correction_url>:<correction_port>/v1/chat/completions` |
-| OpenRouter | `https://openrouter.ai/api/v1/chat/completions` |
-| Groq | `https://api.groq.com/v1/chat/completions` |
-
----
-
-## Vokabular
-
-`vocabulary.json` enthält Wort-Ersetzungen, die nach der Transkription und vor dem LLM-Aufruf angewendet werden (z. B. häufig falsch erkannte Eigennamen). Das Vokabular wird **nicht** automatisch gelernt — Einträge werden ausschließlich manuell über **Einstellungen → Vokabular verwalten** oder durch direktes Bearbeiten der JSON-Datei hinzugefügt.
-
----
-
-## Einstellungsfenster
-
-| Button | Funktion |
-|---|---|
-| **Mikrofon testen** | 3-Sekunden-Aufnahme mit Pegelanzeige |
-| **Health Check** | Erreichbarkeit des Whisper-Servers prüfen |
-| **Whisper testen** | 3-Sekunden-Aufnahme mit sofortiger Transkription |
-| **Testkorrektur** | LLM-Verbindung testen |
-| **Vokabular verwalten** | Einträge in `vocabulary.json` ansehen, hinzufügen und entfernen |
-| **LLM-Prompt bearbeiten** | System-Prompt und Modell-Parameter (Temperature, Top-p, Max Tokens, Context) bearbeiten |
-| **Speichern** | Einstellungen sichern und Hotkey sofort aktualisieren |
-| **Werkseinstellungen** | Alle Einstellungen auf Standardwerte zurücksetzen |
-
----
-
-## Build (EXE erstellen)
-
-```powershell
-.venv\Scripts\pyinstaller.exe FlüsterFee.spec
-```
-
-Die fertige EXE liegt unter `dist\FlüsterFee.exe`. Folgende Dateien müssen **neben** der EXE liegen:
-
-| Datei | Pflicht | Beschreibung |
-|---|---|---|
-| `config.json` | ✅ | Konfiguration |
-| `vocabulary.json` | optional | Wort-Ersetzungen |
-| `system_prompt.txt` | optional | Überschreibt den eingebauten LLM-Prompt |
-
----
-
-## Tray-Icon anpassen
-
-1. `tray_icon.png` (PNG, empfohlen 256×256, RGBA) ins Projektverzeichnis legen
-2. `tray_icon.ico` (ICO) für das EXE-Datei-Icon
-3. Neu bauen
-
----
-
-## Entwicklung
-
-```powershell
-uv sync
-uv run python app.py
-```
-
-Tests ausführen:
-
-```powershell
-.venv\Scripts\python.exe -m pytest tests/ -q
+  overlay.py
+  popups.py
+  settings_window.py
+  translations.py
+  utils.py
 ```
