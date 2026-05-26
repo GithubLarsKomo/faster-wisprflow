@@ -4,6 +4,7 @@
   "whisper_token": "",
   "whisper_model": "whisper-large-v3-turbo",
   "whisper_provider": "lokal",
+  "transcription_guidance_enabled": false,
   "whisper_endpoint": "transcribe",
   "health_endpoint": "health",
   "language": "de",
@@ -11,6 +12,7 @@
   "response_format": "text",
   "sample_rate": 16000,
   "channels": 1,
+  "max_recording": 60,
   "input_device": 0,
   "hotkey_keys": [
     "ctrl",

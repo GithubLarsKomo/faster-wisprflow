@@ -23,6 +23,7 @@ All Win32 calls are thread-safe (clipboard is mutex-guarded by the OS).
 
 import ctypes
 import ctypes.wintypes as wt
+import re
 import time
 
 # ── Win32 types / constants ──────────────────────────────────────────────────
@@ -30,7 +31,11 @@ CF_UNICODETEXT = 13
 GMEM_MOVEABLE = 0x0002
 
 VK_CONTROL = 0x11
+VK_SHIFT = 0x10
 VK_V = 0x56
+VK_C = 0x43
+VK_LEFT = 0x25
+VK_RIGHT = 0x27
 
 INPUT_KEYBOARD = 1
 KEYEVENTF_KEYUP = 0x0002
@@ -183,6 +188,121 @@ def _send_ctrl_v() -> None:
     _u32.SendInput(4, inputs, ctypes.sizeof(_INPUT))
 
 
+def _send_ctrl_c() -> None:
+    """Post a Ctrl+C key-down/up pair via SendInput."""
+    inputs = (_INPUT * 4)(
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_CONTROL, wScan=0, dwFlags=0, time=0, dwExtraInfo=None
+                )
+            ),
+        ),
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(wVk=VK_C, wScan=0, dwFlags=0, time=0, dwExtraInfo=None)
+            ),
+        ),
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_C, wScan=0, dwFlags=KEYEVENTF_KEYUP, time=0, dwExtraInfo=None
+                )
+            ),
+        ),
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_CONTROL,
+                    wScan=0,
+                    dwFlags=KEYEVENTF_KEYUP,
+                    time=0,
+                    dwExtraInfo=None,
+                )
+            ),
+        ),
+    )
+    _u32.SendInput(4, inputs, ctypes.sizeof(_INPUT))
+
+
+def _send_shift_left() -> None:
+    """Select one character to the left."""
+    inputs = (_INPUT * 4)(
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_SHIFT, wScan=0, dwFlags=0, time=0, dwExtraInfo=None
+                )
+            ),
+        ),
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_LEFT, wScan=0, dwFlags=0, time=0, dwExtraInfo=None
+                )
+            ),
+        ),
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_LEFT,
+                    wScan=0,
+                    dwFlags=KEYEVENTF_KEYUP,
+                    time=0,
+                    dwExtraInfo=None,
+                )
+            ),
+        ),
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_SHIFT,
+                    wScan=0,
+                    dwFlags=KEYEVENTF_KEYUP,
+                    time=0,
+                    dwExtraInfo=None,
+                )
+            ),
+        ),
+    )
+    _u32.SendInput(4, inputs, ctypes.sizeof(_INPUT))
+
+
+def _send_right() -> None:
+    """Move caret one character to the right."""
+    inputs = (_INPUT * 2)(
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_RIGHT, wScan=0, dwFlags=0, time=0, dwExtraInfo=None
+                )
+            ),
+        ),
+        _INPUT(
+            type=INPUT_KEYBOARD,
+            _input=_INPUT_UNION(
+                ki=_KEYBDINPUT(
+                    wVk=VK_RIGHT,
+                    wScan=0,
+                    dwFlags=KEYEVENTF_KEYUP,
+                    time=0,
+                    dwExtraInfo=None,
+                )
+            ),
+        ),
+    )
+    _u32.SendInput(2, inputs, ctypes.sizeof(_INPUT))
+
+
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
@@ -193,9 +313,61 @@ class TextInserter:
     def __init__(self, config) -> None:
         self.config = config
 
+    @staticmethod
+    def _capitalize_first_latin_word(text: str) -> str:
+        """Uppercase first latin letter in the chunk, preserving surrounding text."""
+        if not text:
+            return text
+        return re.sub(
+            r"([a-z\u00e0-\u00f6\u00f8-\u00ff])",
+            lambda m: m.group(1).upper(),
+            text,
+            count=1,
+        )
+
+    @staticmethod
+    def _needs_sentence_capitalization(prev_char: str | None) -> bool:
+        """Return True if previous context indicates a new sentence/paragraph start."""
+        if prev_char is None:
+            return True
+        return prev_char in ".!?;:\n\r"
+
+    def _peek_previous_non_space_char(self, lookback: int = 8) -> str | None:
+        """Try to read a short left context by selecting/copying text before the caret."""
+        sentinel = "__FWF_PREV_CHAR_SENTINEL__"
+        if not _set_clipboard_text(sentinel):
+            return None
+
+        time.sleep(0.02)
+        for _ in range(max(1, int(lookback))):
+            _send_shift_left()
+        time.sleep(0.03)
+        _send_ctrl_c()
+        time.sleep(0.04)
+        snippet = _get_clipboard_text()
+        for _ in range(max(1, int(lookback))):
+            _send_right()
+
+        if not snippet or snippet == sentinel:
+            return None
+        stripped = snippet.rstrip()
+        if not stripped:
+            return None
+        return stripped[-1]
+
+    def _apply_cursor_context_case(self, text: str) -> str:
+        if not bool(getattr(self.config, "transcription_guidance_enabled", False)):
+            return text
+        prev_char = self._peek_previous_non_space_char()
+        if self._needs_sentence_capitalization(prev_char):
+            return self._capitalize_first_latin_word(text)
+        return text
+
     def insert_text(self, text: str) -> None:
         if not text:
             return
+
+        text = self._apply_cursor_context_case(text)
 
         # 1. Save existing clipboard if requested
         old_text: str | None = None

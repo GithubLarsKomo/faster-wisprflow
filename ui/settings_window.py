@@ -10,14 +10,17 @@ import soundfile as sf
 
 from config import (
     _DEFAULT_SYSTEM_PROMPT,
+    _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT,
     BASE_DIR,
     DEFAULT_CONFIG,
     Config,
     _build_base_url,
     load_config,
     load_system_prompt,
+    load_transcription_initial_prompt,
     save_config,
     save_system_prompt,
+    save_transcription_initial_prompt,
 )
 from llm_corrector import LLMCorrector
 from ui.popups import _LLMPopup, _MicLevelPopup
@@ -68,6 +71,7 @@ class SettingsWindow:
         self.ui_lang_var = tk.StringVar(value=cfg.get("ui_language", "de"))
         self.rate_var = tk.StringVar(value=str(cfg["sample_rate"]))
         self.channels_var = tk.StringVar(value=str(cfg["channels"]))
+        self.max_recording_var = tk.StringVar(value=str(cfg.get("max_recording", 60)))
         self.hotkey_var = tk.StringVar(value="+".join(cfg["hotkey_keys"]))
         self.restore_var = tk.BooleanVar(value=cfg["restore_clipboard"])
         self.elevate_var = tk.BooleanVar(value=cfg.get("auto_elevate", False))
@@ -83,6 +87,9 @@ class SettingsWindow:
         self.llm_token_var = tk.StringVar(value=cfg.get("correction_token", ""))
         self.whisper_provider_var = tk.StringVar(
             value=cfg.get("whisper_provider", "lokal")
+        )
+        self.transcription_guidance_var = tk.BooleanVar(
+            value=cfg.get("transcription_guidance_enabled", False)
         )
         self.llm_provider_var = tk.StringVar(value=cfg.get("llm_provider", "Ollama"))
         self.proxy_var = tk.StringVar(value=cfg.get("proxy", ""))
@@ -190,6 +197,12 @@ class SettingsWindow:
             row=3, column=1, sticky="w", pady=3
         )
 
+        _lbl_max_recording = ttk.Label(aud, text="Max. Aufnahme (s)")
+        _lbl_max_recording.grid(row=4, column=0, **LBL)
+        ttk.Entry(aud, textvariable=self.max_recording_var, width=6).grid(
+            row=4, column=1, sticky="w", pady=3
+        )
+
         _btn_save_ref: list = [None]
         _btn_whisper_settings_ref: list = [None]
         _btn_llm_settings_ref: list = [None]
@@ -212,6 +225,7 @@ class SettingsWindow:
             _lbl_mic.configure(text=t["microphone"])
             _lbl_rate.configure(text=t["sample_rate"])
             _lbl_channels.configure(text=t["channels"])
+            _lbl_max_recording.configure(text=t["max_recording"])
             _btn_mic.configure(text=t["btn_mic_test"])
             if _btn_save_ref[0] is not None:
                 _btn_save_ref[0].configure(text=t["btn_save"])
@@ -328,6 +342,12 @@ class SettingsWindow:
         cfg["ui_language"] = self.ui_lang_var.get()
         cfg["sample_rate"] = int(self.rate_var.get())
         cfg["channels"] = int(self.channels_var.get())
+        max_recording_str = self.max_recording_var.get().strip()
+        cfg["max_recording"] = (
+            int(max_recording_str)
+            if max_recording_str.isdigit() and int(max_recording_str) > 0
+            else DEFAULT_CONFIG["max_recording"]
+        )
         cfg["input_device"] = self.selected_device_id()
         cfg["hotkey_keys"] = [
             x.strip() for x in self.hotkey_var.get().split("+") if x.strip()
@@ -346,6 +366,9 @@ class SettingsWindow:
         cfg["whisper_token"] = self.whisper_token_var.get().strip()
         cfg["whisper_model"] = self.whisper_model_var.get().strip()
         cfg["whisper_provider"] = self.whisper_provider_var.get()
+        cfg["transcription_guidance_enabled"] = bool(
+            self.transcription_guidance_var.get()
+        )
         cfg["correction_token"] = self.llm_token_var.get().strip()
         cfg["llm_provider"] = self.llm_provider_var.get()
         cfg["proxy"] = self.proxy_var.get().strip()
@@ -369,6 +392,7 @@ class SettingsWindow:
             return
 
         save_config(DEFAULT_CONFIG)
+        save_transcription_initial_prompt(_DEFAULT_TRANSCRIPTION_INITIAL_PROMPT)
         save_system_prompt(_DEFAULT_SYSTEM_PROMPT)
         self.app.reload_config()
 
@@ -381,6 +405,7 @@ class SettingsWindow:
         self.ui_lang_var.set(DEFAULT_CONFIG.get("ui_language", "de"))
         self.rate_var.set(str(DEFAULT_CONFIG["sample_rate"]))
         self.channels_var.set(str(DEFAULT_CONFIG["channels"]))
+        self.max_recording_var.set(str(DEFAULT_CONFIG["max_recording"]))
         self.hotkey_var.set("+".join(DEFAULT_CONFIG["hotkey_keys"]))
         self.restore_var.set(DEFAULT_CONFIG["restore_clipboard"])
         self.elevate_var.set(DEFAULT_CONFIG["auto_elevate"])
@@ -392,6 +417,9 @@ class SettingsWindow:
         self.llm_model_var.set(DEFAULT_CONFIG.get("correction_model", ""))
         self.whisper_model_var.set(DEFAULT_CONFIG.get("whisper_model", ""))
         self.whisper_provider_var.set(DEFAULT_CONFIG.get("whisper_provider", "lokal"))
+        self.transcription_guidance_var.set(
+            DEFAULT_CONFIG.get("transcription_guidance_enabled", False)
+        )
         self.llm_provider_var.set(DEFAULT_CONFIG.get("llm_provider", "Ollama"))
         self.proxy_var.set(DEFAULT_CONFIG.get("proxy", ""))
 
@@ -615,7 +643,7 @@ class SettingsWindow:
         self._whisper_win = twin
         self._dialog_parent = twin
         twin.title(tr["srv_frame"])
-        _center_on_target(twin, 500, 390)
+        _center_on_target(twin, 580, 560)
         twin.resizable(False, True)
         twin.attributes("-topmost", True)
 
@@ -661,6 +689,50 @@ class SettingsWindow:
         _e_model = ttk.Entry(frm, textvariable=self.whisper_model_var)
         _e_model.grid(row=6, column=1, **INP)
 
+        ttk.Checkbutton(
+            frm,
+            text=tr["transcription_guidance"],
+            variable=self.transcription_guidance_var,
+        ).grid(row=7, column=0, columnspan=2, sticky="w", pady=(6, 3))
+
+        prompt_frm = ttk.LabelFrame(
+            frm, text=tr["transcription_prompt_frame"], padding=(8, 6)
+        )
+        prompt_frm.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(8, 0))
+        prompt_frm.columnconfigure(0, weight=1)
+
+        prompt_txt_outer = ttk.Frame(prompt_frm)
+        prompt_txt_outer.pack(fill="x")
+        prompt_txt_outer.columnconfigure(0, weight=1)
+        prompt_txt = tk.Text(
+            prompt_txt_outer, wrap="word", width=62, height=8, undo=True
+        )
+        prompt_txt.grid(row=0, column=0, sticky="ew")
+        prompt_vsb = ttk.Scrollbar(
+            prompt_txt_outer, orient="vertical", command=prompt_txt.yview
+        )
+        prompt_vsb.grid(row=0, column=1, sticky="ns")
+        prompt_txt.configure(yscrollcommand=prompt_vsb.set)
+        prompt_txt.insert("1.0", load_transcription_initial_prompt())
+
+        _prompt_btn_frm = ttk.Frame(prompt_frm)
+        _prompt_btn_frm.pack(anchor="e", pady=(4, 0))
+
+        def _reset_transcription_prompt_only():
+            if messagebox.askyesno(
+                tr["btn_prompt_factory"],
+                tr["msg_transcription_prompt_factory_confirm"],
+                parent=twin,
+            ):
+                prompt_txt.delete("1.0", "end")
+                prompt_txt.insert("1.0", _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT)
+
+        ttk.Button(
+            _prompt_btn_frm,
+            text=tr["btn_prompt_factory"],
+            command=_reset_transcription_prompt_only,
+        ).pack(side="right")
+
         def _update_fields(*_):
             is_local = self.whisper_provider_var.get() == "lokal"
             for w in (_e_url, _e_port, _e_endpoint, _e_health):
@@ -684,7 +756,7 @@ class SettingsWindow:
 
         # ── Buttons ──────────────────────────────────────────
         btn_frm = ttk.Frame(frm)
-        btn_frm.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        btn_frm.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         _btn_health = ttk.Button(
             btn_frm, text=tr["btn_health"], command=self.test_health
         )
@@ -705,7 +777,11 @@ class SettingsWindow:
             cfg["whisper_token"] = self.whisper_token_var.get().strip()
             cfg["whisper_model"] = self.whisper_model_var.get().strip()
             cfg["whisper_provider"] = self.whisper_provider_var.get()
+            cfg["transcription_guidance_enabled"] = bool(
+                self.transcription_guidance_var.get()
+            )
             save_config(cfg)
+            save_transcription_initial_prompt(prompt_txt.get("1.0", "end-1c"))
             self.app.reload_config()
             messagebox.showinfo(tr["srv_frame"], tr["msg_saved_body"], parent=twin)
 

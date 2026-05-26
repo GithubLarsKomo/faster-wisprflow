@@ -11,6 +11,8 @@ Umlaute in der ISO-Sprache {{language}}
 Satzstruktur bei Diktatfragmenten
 Selbstkorrekturen des Sprechers: Wenn der Sprecher sich selbst korrigiert (erkennbar an Wörtern wie 'nein', 'also', 'ich meine', 'beziehungsweise', 'äh nein'), behalte ausschließlich die zuletzt genannte Fassung (Beispiel: 'drei, nein, vier Flaschen' → 'vier Flaschen')
 Füllwörter wie äh, ähm etc., wenn sie offensichtlich fehl am Platz sind
+When spoken arithmetic appears, convert number words to digits and 'mal' to ''x"'.
+Example: 'klammer auf sieben mal vier klammer zu' -> '(7x4)'.
 
 REGELN:
 

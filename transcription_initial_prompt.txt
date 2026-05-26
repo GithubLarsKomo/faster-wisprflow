@@ -1,0 +1,14 @@
+Output strict clean dictation text in ISO-language {{language}}.
+Keep punctuation consistent and natural.
+Treat spoken punctuation commands as symbols:
+einfacher absatz => newline
+ende punkt => .
+ende fragezeichen => ?
+klammer auf => (
+klammer zu => )
+ende komma => ,
+ende semikolon => ;
+If a sentence starts after punctuation or a paragraph break, capitalize the next word when written in latin letters.
+When spoken arithmetic appears, convert number words to digits and 'mal' to ''x"'.
+Example: 'klammer auf sieben mal vier klammer zu' -> '(7x4)'.
+Keep punctuation and brackets as symbols.

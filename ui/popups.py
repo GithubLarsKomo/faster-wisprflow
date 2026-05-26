@@ -18,7 +18,7 @@ class _MicLevelPopup:
     _D_R = 2  # dot radius (px)
     _D_GAP = 3  # gap between dots (px)
     _D_PAD = 5  # gap between bars and dots (px)
-    _MAX_SECONDS = 30.0  # recording hard limit
+    _DEFAULT_MAX_SECONDS = 60.0  # recording hard limit fallback
 
     _IDLE_BG = "#ffffff"
     _IDLE_LLM_BG = "#99cc99"  # green when LLM correction is enabled
@@ -33,7 +33,9 @@ class _MicLevelPopup:
         llm_enabled: bool = False,
         on_timeout=None,
         idle: bool = False,
+        max_seconds: float | int | None = None,
     ) -> None:
+        self._max_seconds = self._sanitize_max_seconds(max_seconds)
         self._idle_bg = self._IDLE_LLM_BG if llm_enabled else self._IDLE_BG
         if idle:
             pill_bg = self._idle_bg
@@ -134,6 +136,19 @@ class _MicLevelPopup:
 
         self.top.after(50, self._tick)
 
+    @classmethod
+    def _sanitize_max_seconds(cls, value: float | int | None) -> float:
+        try:
+            seconds = float(value)
+            if seconds > 0:
+                return seconds
+        except (TypeError, ValueError):
+            pass
+        return cls._DEFAULT_MAX_SECONDS
+
+    def set_max_seconds(self, max_seconds: float | int | None) -> None:
+        self._max_seconds = self._sanitize_max_seconds(max_seconds)
+
     def set_rms(self, rms: float) -> None:
         self._rms = rms
 
@@ -167,7 +182,7 @@ class _MicLevelPopup:
         # Progress bar (only during recording, before expand_for_dots is called)
         if not self._timeout_fired:
             elapsed = time.monotonic() - self._start_time
-            progress = min(elapsed / self._MAX_SECONDS, 1.0)
+            progress = min(elapsed / self._max_seconds, 1.0)
             fill_w = progress * self._dots_w
             dx0 = self._dots_x0
             by0 = self._cy - self._MH // 2

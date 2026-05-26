@@ -243,3 +243,51 @@ class TestTextInserter:
 
         total_sleep = sum(sleep_calls)
         assert total_sleep < 0.15 + TextInserter.WORD_EXTRA_DELAY
+
+    def test_guidance_capitalizes_after_sentence_punctuation(self):
+        ti = self._make(
+            restore_clipboard=False,
+            transcription_guidance_enabled=True,
+        )
+        with (
+            patch.object(ti, "_peek_previous_non_space_char", return_value="."),
+            patch("text_inserter._set_clipboard_text", return_value=True) as mock_set,
+            patch("text_inserter._send_ctrl_v"),
+            patch("text_inserter._foreground_exe", return_value="notepad.exe"),
+            patch("text_inserter.time.sleep"),
+        ):
+            ti.insert_text("hallo welt")
+
+        mock_set.assert_called_once_with("Hallo welt")
+
+    def test_guidance_keeps_case_after_non_sentence_context(self):
+        ti = self._make(
+            restore_clipboard=False,
+            transcription_guidance_enabled=True,
+        )
+        with (
+            patch.object(ti, "_peek_previous_non_space_char", return_value=","),
+            patch("text_inserter._set_clipboard_text", return_value=True) as mock_set,
+            patch("text_inserter._send_ctrl_v"),
+            patch("text_inserter._foreground_exe", return_value="notepad.exe"),
+            patch("text_inserter.time.sleep"),
+        ):
+            ti.insert_text("hallo welt")
+
+        mock_set.assert_called_once_with("hallo welt")
+
+    def test_guidance_disabled_skips_cursor_probe(self):
+        ti = self._make(
+            restore_clipboard=False,
+            transcription_guidance_enabled=False,
+        )
+        with (
+            patch.object(ti, "_peek_previous_non_space_char") as mock_probe,
+            patch("text_inserter._set_clipboard_text", return_value=True),
+            patch("text_inserter._send_ctrl_v"),
+            patch("text_inserter._foreground_exe", return_value="notepad.exe"),
+            patch("text_inserter.time.sleep"),
+        ):
+            ti.insert_text("hallo welt")
+
+        mock_probe.assert_not_called()

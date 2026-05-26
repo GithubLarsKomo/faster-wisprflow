@@ -13,6 +13,7 @@ else:
 
 VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
 PROMPT_PATH = CONFIG_PATH.parent / "system_prompt.txt"
+TRANSCRIPTION_PROMPT_PATH = CONFIG_PATH.parent / "transcription_initial_prompt.txt"
 
 _DEFAULT_SYSTEM_PROMPT = "\n".join(
     [
@@ -29,6 +30,8 @@ _DEFAULT_SYSTEM_PROMPT = "\n".join(
         "Satzstruktur bei Diktatfragmenten",
         "Selbstkorrekturen des Sprechers: Wenn der Sprecher sich selbst korrigiert (erkennbar an Wörtern wie 'nein', 'also', 'ich meine', 'beziehungsweise', 'äh nein'), behalte ausschließlich die zuletzt genannte Fassung (Beispiel: 'drei, nein, vier Flaschen' → 'vier Flaschen')",
         "Füllwörter wie äh, ähm etc., wenn sie offensichtlich fehl am Platz sind",
+        "When spoken arithmetic appears, convert number words to digits and 'mal' to 'x'.",
+        "Example: 'klammer auf sieben mal vier klammer zu' -> '(7x4)'.",
         "",
         "REGELN:",
         "",
@@ -41,6 +44,25 @@ _DEFAULT_SYSTEM_PROMPT = "\n".join(
         "Ausgabe nur als finaler Text",
         "Kein Markdown",
         "Keine Erklärungen",
+    ]
+)
+
+_DEFAULT_TRANSCRIPTION_INITIAL_PROMPT = "\n".join(
+    [
+        "Output strict clean dictation text in ISO-language {{language}}.",
+        "Keep punctuation consistent and natural.",
+        "Treat spoken punctuation commands as symbols:",
+        "einfacher absatz => newline",
+        "ende punkt => .",
+        "ende fragezeichen => ?",
+        "klammer auf => (",
+        "klammer zu => )",
+        "ende komma => ,",
+        "ende semikolon => ;",
+        "If a sentence starts after punctuation or a paragraph break, capitalize the next word when written in latin letters.",
+        "When spoken arithmetic appears, convert number words to digits and 'mal' to 'x'.",
+        "Example: 'klammer auf sieben mal vier klammer zu' -> '(7x4)'.",
+        "Keep punctuation and brackets as symbols.",
     ]
 )
 
@@ -66,6 +88,28 @@ def save_system_prompt(text: str) -> None:
     PROMPT_PATH.write_text(text, encoding="utf-8")
 
 
+def load_transcription_initial_prompt(config_data: dict | None = None) -> str:
+    """Return the transcription initial prompt.
+
+    Priority: ``transcription_initial_prompt.txt`` on disk →
+    *config_data*[``transcription_initial_prompt``] (migration path from JSON) →
+    built-in default.
+    """
+    if TRANSCRIPTION_PROMPT_PATH.exists():
+        try:
+            return TRANSCRIPTION_PROMPT_PATH.read_text(encoding="utf-8")
+        except Exception:
+            pass
+    if config_data and "transcription_initial_prompt" in config_data:
+        return config_data["transcription_initial_prompt"]
+    return _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT
+
+
+def save_transcription_initial_prompt(text: str) -> None:
+    """Persist the transcription initial prompt to ``transcription_initial_prompt.txt``."""
+    TRANSCRIPTION_PROMPT_PATH.write_text(text, encoding="utf-8")
+
+
 def _resource(filename: str) -> Path:
     """Resolve path to a bundled resource (works in PyInstaller onefile and dev)."""
     meipass = getattr(sys, "_MEIPASS", None)
@@ -80,6 +124,7 @@ DEFAULT_CONFIG = {
     "whisper_token": "",
     "whisper_model": "whisper-large-v3-turbo",
     "whisper_provider": "lokal",
+    "transcription_guidance_enabled": False,
     "whisper_endpoint": "transcribe",
     "health_endpoint": "health",
     "language": "de",
@@ -87,6 +132,7 @@ DEFAULT_CONFIG = {
     "response_format": "text",
     "sample_rate": 16000,
     "channels": 1,
+    "max_recording": 60,
     "input_device": None,
     "hotkey_keys": ["ctrl", "linke windows"],
     "restore_clipboard": True,
@@ -163,6 +209,10 @@ class Config:
         self.whisper_token = data.get("whisper_token", "")
         self.whisper_model = data.get("whisper_model", "")
         self.whisper_provider = data.get("whisper_provider", "lokal")
+        self.transcription_guidance_enabled = bool(
+            data.get("transcription_guidance_enabled", False)
+        )
+        self.transcription_initial_prompt = load_transcription_initial_prompt(data)
         self.whisper_endpoint = data.get("whisper_endpoint", "/transcribe")
         self.health_endpoint = data.get("health_endpoint", "/health")
         self.language = data["language"]
@@ -170,6 +220,7 @@ class Config:
         self.response_format = data["response_format"]
         self.sample_rate = int(data["sample_rate"])
         self.channels = int(data["channels"])
+        self.max_recording = int(data.get("max_recording", 60))
         self.input_device = data.get("input_device", None)
         self.hotkey_keys = data["hotkey_keys"]
         self.restore_clipboard = bool(data["restore_clipboard"])

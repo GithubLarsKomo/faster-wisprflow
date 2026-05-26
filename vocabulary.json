@@ -1,7 +1,17 @@
 {
   "corrections": {
     "rosch": "Roche",
-    "qwe": "qwe",
-    "qweqe": "qweqwe"
+    "einfacher absatz": "\n",
+    "tabulator": "\t",
+    "ende doppelpunkt": ":",
+    "ende punkt": ".",
+    "ende fragezeichen": "?",
+    "ende ausrufezeichen": "!",
+    "ende komma": ",",
+    "ende semikolon": ";",
+    "klammer auf": "(",
+    "klammer zu": ")",
+    "geschweifte klammer auf": "{",
+    "geschweifte klammer zu": "}"
   }
 }

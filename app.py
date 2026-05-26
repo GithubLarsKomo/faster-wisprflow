@@ -50,9 +50,14 @@ class App:
         self.llm = LLMCorrector(self.config)
         self.overlay.update_language(self.config.ui_language)
         if self._rec_popup:
+
+            def _update_popup() -> None:
+                self._rec_popup.set_llm_enabled(self.config.correction_enabled)
+                self._rec_popup.set_max_seconds(self.config.max_recording)
+
             self.overlay.root.after(
                 0,
-                lambda: self._rec_popup.set_llm_enabled(self.config.correction_enabled),
+                _update_popup,
             )
 
     def hotkey_pressed(self):
@@ -227,6 +232,7 @@ class App:
             self.overlay.root,
             llm_enabled=self.config.correction_enabled,
             idle=True,
+            max_seconds=self.config.max_recording,
         )
 
 

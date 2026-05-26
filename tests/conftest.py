@@ -53,6 +53,7 @@ def make_stub_config(**overrides):
         whisper_token="",
         whisper_model="whisper-large-v3-turbo",
         whisper_provider="lokal",
+        transcription_guidance_enabled=False,
         whisper_endpoint="transcribe",
         health_endpoint="health",
         language="de",

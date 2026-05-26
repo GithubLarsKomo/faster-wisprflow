@@ -6,13 +6,13 @@ from unittest.mock import MagicMock, mock_open, patch
 import pytest
 import requests
 
-from whisper_client import WhisperClient
 from tests.conftest import make_stub_config
-
+from whisper_client import WhisperClient
 
 # ---------------------------------------------------------------------------
 # _proxies
 # ---------------------------------------------------------------------------
+
 
 class TestProxies:
     def test_empty_proxy_bypasses(self):
@@ -29,6 +29,7 @@ class TestProxies:
 # ---------------------------------------------------------------------------
 # transcribe — routing
 # ---------------------------------------------------------------------------
+
 
 class TestTranscribeRouting:
     def test_routes_to_openrouter(self):
@@ -56,10 +57,19 @@ class TestTranscribeRouting:
             wc.transcribe(Path("audio.wav"))
         m.assert_called_once()
 
+    def test_applies_guidance_when_enabled(self):
+        wc = WhisperClient(make_stub_config(transcription_guidance_enabled=True))
+        with patch.object(
+            wc, "_transcribe_custom", return_value="hallo ende punkt test"
+        ):
+            result = wc.transcribe(Path("audio.wav"))
+        assert result == "hallo. Test"
+
 
 # ---------------------------------------------------------------------------
 # _transcribe_custom
 # ---------------------------------------------------------------------------
+
 
 class TestTranscribeCustom:
     def _make(self, **kw):
@@ -165,10 +175,42 @@ class TestTranscribeCustom:
             with pytest.raises(requests.HTTPError):
                 wc._transcribe_custom(audio_path)
 
+    def test_includes_initial_prompt_when_guidance_enabled(self):
+        wc = self._make(transcription_guidance_enabled=True)
+        audio_path = MagicMock(spec=Path)
+        audio_path.name = "audio.wav"
+
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.text = "text"
+
+        with (
+            patch("builtins.open", mock_open()),
+            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+        ):
+            wc._transcribe_custom(audio_path)
+
+        data = mock_post.call_args[1]["data"]
+        assert "initial_prompt" in data
+        assert "dictation" in data["initial_prompt"].lower()
+
+
+class TestGuidancePostProcessing:
+    def test_replaces_spoken_commands(self):
+        wc = WhisperClient(make_stub_config(transcription_guidance_enabled=True))
+        text = "Das ist ende komma gut ende punkt"
+        assert wc._apply_transcription_guidance(text) == "Das ist, gut."
+
+    def test_caps_after_punctuation_and_paragraph(self):
+        wc = WhisperClient(make_stub_config(transcription_guidance_enabled=True))
+        text = "eins ende punkt zwei einfacher absatz drei"
+        assert wc._apply_transcription_guidance(text) == "eins. Zwei\nDrei"
+
 
 # ---------------------------------------------------------------------------
 # _transcribe_openrouter
 # ---------------------------------------------------------------------------
+
 
 class TestTranscribeOpenrouter:
     def test_returns_text(self):
@@ -194,6 +236,7 @@ class TestTranscribeOpenrouter:
 # ---------------------------------------------------------------------------
 # _transcribe_groq
 # ---------------------------------------------------------------------------
+
 
 class TestTranscribeGroq:
     def test_returns_text(self):
