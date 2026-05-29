@@ -12,6 +12,7 @@ Push-to-talk Spracheingabe fuer Windows: Hotkey halten -> sprechen -> loslassen 
 | Transkriptions-Guidance | Optionales Prompting + Normalisierung fuer Satzzeichen/Befehle |
 | Editierbarer Initial Prompt | Eigener Prompt fuer Transkription in den Einstellungen, persistiert in Datei |
 | LLM-Korrektur | Ollama, Groq oder OpenRouter fuer Textkorrektur |
+| Multi-Prompt-Manager | Mehrere Korrektur-Prompts als Markdown-Dateien, aktiver Prompt per Klick waehlbar |
 | Vokabular | Ersetzungen aus `vocabulary.json`, im UI verwaltbar |
 | Cursor-Kontext-Grossschreibung | Optional: erster Buchstabe wird am Cursor-Kontext ausgerichtet |
 | Mehrsprachige UI | de, en, fr, es, zh, pt, pl, it |
@@ -30,9 +31,9 @@ Push-to-talk Spracheingabe fuer Windows: Hotkey halten -> sprechen -> loslassen 
 2. `config.json` mindestens fuer Whisper-URL/Port und Hotkey konfigurieren.
 3. EXE starten, ueber Tray/Einstellungen Feintuning vornehmen.
 
-Optionale Prompt-Dateien neben der EXE:
+Optionale Dateien neben der EXE:
 
-- `system_prompt.txt` fuer LLM-Korrektur
+- `corrector_prompts/` Ordner mit `*.md`-Dateien fuer LLM-Korrektur-Prompts (wird beim ersten Start automatisch angelegt)
 - `transcription_initial_prompt.txt` fuer Transkriptions-Initial-Prompt
 
 ## Konfiguration (`config.json`)
@@ -85,14 +86,17 @@ Optionale Prompt-Dateien neben der EXE:
 | `top_p` | `1` | Top-p |
 | `max_tokens` | `220` | Maximale Ausgabelaenge |
 | `num_ctx` | `1024` | Kontextfenster |
+| `active_corrector_prompt` | `'default.md'` | Aktiver Korrektur-Prompt (Dateiname in `corrector_prompts/`) |
 
 ## Prompt-Dateien
 
-### LLM-System-Prompt
+### LLM-Korrektur-Prompts
 
-- Datei: `system_prompt.txt`
+- Ordner: `corrector_prompts/` neben der EXE (wird beim ersten Start automatisch erstellt)
+- Jeder Prompt ist eine Markdown-Datei: erste Zeile `# Titel`, danach Prompt-Text
 - Platzhalter: `{{language}}`
-- Kann im Fenster LLM-Korrektur bearbeitet und auf Standard zurueckgesetzt werden.
+- Im Einstellungsfenster (LLM-Korrektur) koennen Prompts erstellt, bearbeitet, dupliziert, geloescht und der aktive Prompt gesetzt werden
+- Bei Migration wird `system_prompt.txt` automatisch als `default.md` uebernommen
 
 ### Transkriptions-Initial-Prompt
 
@@ -114,7 +118,7 @@ Optionale Prompt-Dateien neben der EXE:
 |---|---|
 | Mikrofon testen | 3-Sekunden-Aufnahme mit Pegelanzeige |
 | Transkription | Provider, URL, Port, Modell, Token, Guidance-Checkbox, Initial-Prompt-Editor |
-| LLM-Korrektur | Provider, URL, Port, Modell, Token, System-Prompt, Modellparameter |
+| LLM-Korrektur | Provider, URL, Port, Modell, Token, Korrektur-Prompt-Manager (Neu/Duplizieren/Loeschen/Aktiv setzen/Speichern), Modellparameter |
 | Vokabular verwalten | Eintraege ansehen, hinzufuegen, bearbeiten, entfernen |
 | Speichern | Einstellungen speichern und sofort uebernehmen |
 
@@ -130,7 +134,7 @@ Die fertige EXE liegt unter `dist\FlüsterFee.exe`. Diese Dateien sollten neben 
 |---|---|---|
 | `config.json` | ja | Hauptkonfiguration |
 | `vocabulary.json` | optional | Wort-/Phrasen-Ersetzungen |
-| `system_prompt.txt` | optional | LLM-System-Prompt |
+| `corrector_prompts/` | optional | Ordner mit LLM-Korrektur-Prompts (`*.md`); wird beim ersten Start auto-erstellt |
 | `transcription_initial_prompt.txt` | optional | Initial-Prompt fuer Transkription |
 
 ## Tray-Icon anpassen
