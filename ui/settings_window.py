@@ -13,12 +13,17 @@ from config import (
     _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT,
     BASE_DIR,
     DEFAULT_CONFIG,
+    DEFAULT_CORRECTOR_PROMPT_FILE,
     Config,
     _build_base_url,
+    delete_corrector_prompt,
+    list_corrector_prompts,
     load_config,
+    load_corrector_prompt,
     load_system_prompt,
     load_transcription_initial_prompt,
     save_config,
+    save_corrector_prompt,
     save_system_prompt,
     save_transcription_initial_prompt,
 )
@@ -950,35 +955,218 @@ class SettingsWindow:
         _update_llm_fields()
 
         # ── System-Prompt ─────────────────────────────────────
-        prompt_frm = ttk.LabelFrame(outer, text=" System-Prompt ", padding=(10, 6))
+        # ── Korrektur-Prompts Manager ─────────────────────────
+        prompt_frm = ttk.LabelFrame(
+            outer, text=tr["corrector_prompts_frame"], padding=(10, 6)
+        )
         prompt_frm.pack(fill="x", pady=(0, 8))
-        prompt_frm.columnconfigure(0, weight=1)
 
-        txt_outer = ttk.Frame(prompt_frm)
-        txt_outer.pack(fill="x")
-        txt_outer.columnconfigure(0, weight=1)
-        txt = tk.Text(txt_outer, wrap="word", width=62, height=12, undo=True)
-        txt.grid(row=0, column=0, sticky="ew")
-        vsb = ttk.Scrollbar(txt_outer, orient="vertical", command=txt.yview)
-        vsb.grid(row=0, column=1, sticky="ns")
-        txt.configure(yscrollcommand=vsb.set)
-        txt.insert("1.0", load_system_prompt())
+        _pm_outer = ttk.Frame(prompt_frm)
+        _pm_outer.pack(fill="x")
+        _pm_outer.columnconfigure(1, weight=1)
 
-        _prompt_btn_frm = ttk.Frame(prompt_frm)
-        _prompt_btn_frm.pack(anchor="e", pady=(4, 0))
+        # Left pane — list
+        _pm_left = ttk.Frame(_pm_outer)
+        _pm_left.grid(row=0, column=0, sticky="ns", padx=(0, 8))
 
-        def _reset_prompt_only():
-            if messagebox.askyesno(
-                tr["btn_prompt_factory"],
-                tr["msg_prompt_factory_confirm"],
+        _pm_list_outer = ttk.Frame(_pm_left)
+        _pm_list_outer.pack(fill="both", expand=True)
+        _pm_listbox = tk.Listbox(
+            _pm_list_outer,
+            width=22,
+            height=10,
+            selectmode="browse",
+            activestyle="dotbox",
+        )
+        _pm_listbox.pack(side="left", fill="both", expand=True)
+        _pm_lsb = ttk.Scrollbar(
+            _pm_list_outer, orient="vertical", command=_pm_listbox.yview
+        )
+        _pm_lsb.pack(side="right", fill="y")
+        _pm_listbox.configure(yscrollcommand=_pm_lsb.set)
+
+        _pm_list_btns = ttk.Frame(_pm_left)
+        _pm_list_btns.pack(fill="x", pady=(4, 0))
+        _pm_btn_new = ttk.Button(_pm_list_btns, text=tr["corrector_prompt_new"])
+        _pm_btn_new.pack(side="left", padx=(0, 2))
+        _pm_btn_dup = ttk.Button(_pm_list_btns, text=tr["corrector_prompt_duplicate"])
+        _pm_btn_dup.pack(side="left", padx=2)
+
+        _pm_list_btns2 = ttk.Frame(_pm_left)
+        _pm_list_btns2.pack(fill="x", pady=(2, 0))
+        _pm_btn_del = ttk.Button(_pm_list_btns2, text=tr["corrector_prompt_delete"])
+        _pm_btn_del.pack(side="left", padx=(0, 2))
+        _pm_btn_act = ttk.Button(_pm_list_btns2, text=tr["corrector_prompt_set_active"])
+        _pm_btn_act.pack(side="left", padx=2)
+
+        # Right pane — editor
+        _pm_right = ttk.Frame(_pm_outer)
+        _pm_right.grid(row=0, column=1, sticky="nsew")
+        _pm_right.columnconfigure(1, weight=1)
+
+        ttk.Label(_pm_right, text=tr["corrector_prompt_title_label"]).grid(
+            row=0, column=0, sticky="w", padx=(0, 4), pady=(0, 4)
+        )
+        _pm_title_var = tk.StringVar()
+        _pm_title_entry = ttk.Entry(_pm_right, textvariable=_pm_title_var)
+        _pm_title_entry.grid(row=0, column=1, sticky="ew", pady=(0, 4))
+
+        _pm_txt_outer = ttk.Frame(_pm_right)
+        _pm_txt_outer.grid(row=1, column=0, columnspan=2, sticky="ew")
+        _pm_txt_outer.columnconfigure(0, weight=1)
+        _pm_txt = tk.Text(_pm_txt_outer, wrap="word", width=42, height=10, undo=True)
+        _pm_txt.grid(row=0, column=0, sticky="ew")
+        _pm_vsb = ttk.Scrollbar(_pm_txt_outer, orient="vertical", command=_pm_txt.yview)
+        _pm_vsb.grid(row=0, column=1, sticky="ns")
+        _pm_txt.configure(yscrollcommand=_pm_vsb.set)
+
+        _pm_save_btn_frm = ttk.Frame(_pm_right)
+        _pm_save_btn_frm.grid(row=2, column=0, columnspan=2, sticky="e", pady=(4, 0))
+        _pm_btn_save = ttk.Button(_pm_save_btn_frm, text=tr["corrector_prompt_save"])
+        _pm_btn_save.pack(side="right")
+
+        # State
+        _pm_prompts: list[dict] = []
+        _pm_current_idx: list[int] = [-1]
+        _pm_is_new: list[bool] = [False]
+        _cfg_now = load_config()
+        _pm_active_filename: list[str] = [
+            _cfg_now.get("active_corrector_prompt", DEFAULT_CORRECTOR_PROMPT_FILE)
+        ]
+
+        def _pm_reload_list(select_filename: str | None = None) -> None:
+            _pm_prompts.clear()
+            _pm_prompts.extend(list_corrector_prompts())
+            _pm_listbox.delete(0, "end")
+            select_idx = 0
+            for i, p in enumerate(_pm_prompts):
+                label = ("✓ " if p["filename"] == _pm_active_filename[0] else "  ") + p[
+                    "title"
+                ]
+                _pm_listbox.insert("end", label)
+                if select_filename and p["filename"] == select_filename:
+                    select_idx = i
+                elif not select_filename and p["filename"] == _pm_active_filename[0]:
+                    select_idx = i
+            if _pm_prompts:
+                _pm_listbox.selection_set(select_idx)
+                _pm_on_select(select_idx)
+
+        def _pm_on_select(idx: int) -> None:
+            _pm_current_idx[0] = idx
+            _pm_is_new[0] = False
+            if 0 <= idx < len(_pm_prompts):
+                p = _pm_prompts[idx]
+                _pm_title_var.set(p["title"])
+                _pm_txt.delete("1.0", "end")
+                _pm_txt.insert("1.0", p["text"])
+
+        def _pm_listbox_on_select(event=None) -> None:
+            sel = _pm_listbox.curselection()
+            if sel:
+                _pm_on_select(sel[0])
+
+        _pm_listbox.bind("<<ListboxSelect>>", _pm_listbox_on_select)
+
+        def _pm_slugify(title: str) -> str:
+            import re
+
+            slug = re.sub(r"[^\w\s-]", "", title.lower().strip(), flags=re.UNICODE)
+            slug = re.sub(r"[\s_-]+", "_", slug).strip("_") or "prompt"
+            return slug + ".md"
+
+        def _pm_new() -> None:
+            _pm_is_new[0] = True
+            _pm_current_idx[0] = -1
+            _pm_title_var.set("")
+            _pm_txt.delete("1.0", "end")
+            _pm_listbox.selection_clear(0, "end")
+            _pm_title_entry.focus_set()
+
+        def _pm_save() -> None:
+            title = _pm_title_var.get().strip()
+            text = _pm_txt.get("1.0", "end-1c")
+            if not title:
+                return
+            if _pm_is_new[0]:
+                base = _pm_slugify(title)
+                filename = base
+                existing = {p["filename"] for p in _pm_prompts}
+                counter = 2
+                while filename in existing:
+                    filename = base[:-3] + f"_{counter}.md"
+                    counter += 1
+            else:
+                idx = _pm_current_idx[0]
+                if 0 <= idx < len(_pm_prompts):
+                    filename = _pm_prompts[idx]["filename"]
+                else:
+                    return
+            save_corrector_prompt(filename, title, text)
+            messagebox.showinfo(
+                tr["corrector_prompt_save"],
+                tr["msg_corrector_prompt_saved"],
+                parent=lwin,
+            )
+            _pm_reload_list(select_filename=filename)
+
+        def _pm_duplicate() -> None:
+            idx = _pm_current_idx[0]
+            if idx < 0 or idx >= len(_pm_prompts):
+                return
+            p = _pm_prompts[idx]
+            new_title = p["title"] + " (Kopie)"
+            base = _pm_slugify(new_title)
+            filename = base
+            existing = {q["filename"] for q in _pm_prompts}
+            counter = 2
+            while filename in existing:
+                filename = base[:-3] + f"_{counter}.md"
+                counter += 1
+            save_corrector_prompt(filename, new_title, p["text"])
+            _pm_reload_list(select_filename=filename)
+
+        def _pm_delete() -> None:
+            idx = _pm_current_idx[0]
+            if idx < 0 or idx >= len(_pm_prompts):
+                return
+            if len(_pm_prompts) <= 1:
+                return
+            p = _pm_prompts[idx]
+            if not messagebox.askyesno(
+                tr["corrector_prompt_delete"],
+                tr["msg_corrector_prompt_delete_confirm"],
                 parent=lwin,
             ):
-                txt.delete("1.0", "end")
-                txt.insert("1.0", _DEFAULT_SYSTEM_PROMPT)
+                return
+            if p["filename"] == _pm_active_filename[0]:
+                _pm_active_filename[0] = DEFAULT_CORRECTOR_PROMPT_FILE
+                c = load_config()
+                c["active_corrector_prompt"] = DEFAULT_CORRECTOR_PROMPT_FILE
+                save_config(c)
+                self.app.reload_config()
+            delete_corrector_prompt(p["filename"])
+            _pm_reload_list()
 
-        ttk.Button(
-            _prompt_btn_frm, text=tr["btn_prompt_factory"], command=_reset_prompt_only
-        ).pack(side="right")
+        def _pm_set_active() -> None:
+            idx = _pm_current_idx[0]
+            if idx < 0 or idx >= len(_pm_prompts):
+                return
+            p = _pm_prompts[idx]
+            _pm_active_filename[0] = p["filename"]
+            c = load_config()
+            c["active_corrector_prompt"] = p["filename"]
+            save_config(c)
+            self.app.reload_config()
+            _pm_reload_list(select_filename=p["filename"])
+
+        _pm_btn_new.configure(command=_pm_new)
+        _pm_btn_dup.configure(command=_pm_duplicate)
+        _pm_btn_del.configure(command=_pm_delete)
+        _pm_btn_act.configure(command=_pm_set_active)
+        _pm_btn_save.configure(command=_pm_save)
+
+        _pm_reload_list()
 
         # ── Modell-Parameter ──────────────────────────────────
         params_frm = ttk.LabelFrame(outer, text=" Modell-Parameter ", padding=(8, 4))
@@ -1045,7 +1233,6 @@ class SettingsWindow:
         btn_frm.pack(fill="x", pady=(4, 0))
 
         def _save_llm():
-            save_system_prompt(txt.get("1.0", "end-1c"))
             c = load_config()
             c["correction_enabled"] = bool(self.llm_enabled_var.get())
             c["llm_provider"] = self.llm_provider_var.get()
@@ -1082,11 +1269,9 @@ class SettingsWindow:
         def _reset_prompt():
             if messagebox.askyesno(
                 "Standard wiederherstellen",
-                "System-Prompt und Parameter auf Standardwerte zurücksetzen?",
+                "Modell-Parameter auf Standardwerte zurücksetzen?",
                 parent=lwin,
             ):
-                txt.delete("1.0", "end")
-                txt.insert("1.0", _DEFAULT_SYSTEM_PROMPT)
                 temp_var.set(str(DEFAULT_CONFIG["temperature"]))
                 top_p_var.set(str(DEFAULT_CONFIG["top_p"]))
                 max_tokens_var.set(str(DEFAULT_CONFIG["max_tokens"]))

@@ -14,6 +14,8 @@ else:
 VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
 PROMPT_PATH = CONFIG_PATH.parent / "system_prompt.txt"
 TRANSCRIPTION_PROMPT_PATH = CONFIG_PATH.parent / "transcription_initial_prompt.txt"
+CORRECTOR_PROMPTS_DIR = CONFIG_PATH.parent / "corrector_prompts"
+DEFAULT_CORRECTOR_PROMPT_FILE = "default.md"
 
 _DEFAULT_SYSTEM_PROMPT = "\n".join(
     [
@@ -110,6 +112,75 @@ def save_transcription_initial_prompt(text: str) -> None:
     TRANSCRIPTION_PROMPT_PATH.write_text(text, encoding="utf-8")
 
 
+# ── Corrector-Prompt helpers ──────────────────────────────────────────────────
+
+
+def _parse_corrector_prompt_file(path: Path) -> tuple[str, str]:
+    """Parse a corrector prompt markdown file into (title, body)."""
+    try:
+        content = path.read_text(encoding="utf-8")
+    except Exception:
+        return path.stem, ""
+    lines = content.splitlines()
+    title = path.stem
+    body_start = 0
+    if lines and lines[0].startswith("# "):
+        title = lines[0][2:].strip()
+        body_start = 1
+        while body_start < len(lines) and lines[body_start].strip() == "":
+            body_start += 1
+    body = "\n".join(lines[body_start:])
+    return title, body
+
+
+def _ensure_corrector_prompts_dir() -> None:
+    """Create corrector_prompts dir and migrate system_prompt.txt on first run."""
+    CORRECTOR_PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
+    default_file = CORRECTOR_PROMPTS_DIR / DEFAULT_CORRECTOR_PROMPT_FILE
+    if not default_file.exists():
+        if PROMPT_PATH.exists():
+            try:
+                body = PROMPT_PATH.read_text(encoding="utf-8")
+            except Exception:
+                body = _DEFAULT_SYSTEM_PROMPT
+        else:
+            body = _DEFAULT_SYSTEM_PROMPT
+        save_corrector_prompt(DEFAULT_CORRECTOR_PROMPT_FILE, "Werkseinstellung", body)
+
+
+def list_corrector_prompts() -> list[dict]:
+    """Return all corrector prompts as list of {filename, title, text} sorted by filename."""
+    _ensure_corrector_prompts_dir()
+    result = []
+    for path in sorted(CORRECTOR_PROMPTS_DIR.glob("*.md")):
+        title, text = _parse_corrector_prompt_file(path)
+        result.append({"filename": path.name, "title": title, "text": text})
+    return result
+
+
+def load_corrector_prompt(filename: str) -> tuple[str, str]:
+    """Return (title, text) for the given corrector prompt filename."""
+    _ensure_corrector_prompts_dir()
+    path = CORRECTOR_PROMPTS_DIR / filename
+    if path.exists():
+        return _parse_corrector_prompt_file(path)
+    return "", ""
+
+
+def save_corrector_prompt(filename: str, title: str, text: str) -> None:
+    """Write a corrector prompt as a markdown file."""
+    CORRECTOR_PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
+    content = f"# {title}\n\n{text}"
+    (CORRECTOR_PROMPTS_DIR / filename).write_text(content, encoding="utf-8")
+
+
+def delete_corrector_prompt(filename: str) -> None:
+    """Delete a corrector prompt file."""
+    path = CORRECTOR_PROMPTS_DIR / filename
+    if path.exists():
+        path.unlink()
+
+
 def _resource(filename: str) -> Path:
     """Resolve path to a bundled resource (works in PyInstaller onefile and dev)."""
     meipass = getattr(sys, "_MEIPASS", None)
@@ -145,6 +216,7 @@ DEFAULT_CONFIG = {
     "correction_token": "",
     "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
     "llm_provider": "Ollama",
+    "active_corrector_prompt": "default.md",
     "temperature": 0,
     "top_p": 1,
     "num_predict": 220,
@@ -239,5 +311,12 @@ class Config:
         self.num_ctx = data.get("num_ctx", 1024)
         self.repeat_penalty = data.get("repeat_penalty", 1.0)
         self.max_tokens = data.get("max_tokens", 220)
-        self.system_prompt = load_system_prompt(data)
+        self.active_corrector_prompt = data.get(
+            "active_corrector_prompt", DEFAULT_CORRECTOR_PROMPT_FILE
+        )
+        _ensure_corrector_prompts_dir()
+        _, prompt_text = load_corrector_prompt(self.active_corrector_prompt)
+        if not prompt_text:
+            _, prompt_text = load_corrector_prompt(DEFAULT_CORRECTOR_PROMPT_FILE)
+        self.system_prompt = prompt_text or load_system_prompt(data)
         self.proxy = data.get("proxy", "")
