@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import keyring as _keyring
+
 BASE_DIR = Path(__file__).parent
 # In a PyInstaller onefile build sys.executable is the .exe itself;
 # config.json must live next to it, not inside _MEIPASS.
@@ -269,6 +271,36 @@ def _build_base_url(url: str, port) -> str:
     return url
 
 
+_KEYRING_APP = "Fl\u00fcsterFee"
+
+
+def get_token(service: str, provider: str) -> str:
+    """Retrieve an API token from the system keyring.
+
+    *service* is ``'whisper'`` or ``'correction'``; *provider* is the
+    provider name (e.g. ``'Groq'``, ``'Openrouter'``, ``'Ollama'``).
+    Returns an empty string if no token is stored or keyring is unavailable.
+    """
+    try:
+        return _keyring.get_password(f"{_KEYRING_APP}/{service}", provider) or ""
+    except Exception:
+        return ""
+
+
+def set_token(service: str, provider: str, token: str) -> None:
+    """Store or clear an API token in the system keyring."""
+    try:
+        if token:
+            _keyring.set_password(f"{_KEYRING_APP}/{service}", provider, token)
+        else:
+            try:
+                _keyring.delete_password(f"{_KEYRING_APP}/{service}", provider)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 class Config:
     def __init__(self):
         self.reload()
@@ -276,9 +308,23 @@ class Config:
     def reload(self):
         data = load_config()
         self.raw = data
+        # One-time migration: move plaintext tokens from config.json to keyring
+        _changed = False
+        _wt = data.get("whisper_token", "")
+        if _wt:
+            set_token("whisper", data.get("whisper_provider", "lokal"), _wt)
+            data.pop("whisper_token")
+            _changed = True
+        _ct = data.get("correction_token", "")
+        if _ct:
+            set_token("correction", data.get("llm_provider", "Ollama"), _ct)
+            data.pop("correction_token")
+            _changed = True
+        if _changed:
+            save_config(data)
         self.whisper_url = data["whisper_url"]
         self.port = data.get("port", None)
-        self.whisper_token = data.get("whisper_token", "")
+        self.whisper_token = get_token("whisper", data.get("whisper_provider", "lokal"))
         self.whisper_model = data.get("whisper_model", "")
         self.whisper_provider = data.get("whisper_provider", "lokal")
         self.transcription_guidance_enabled = bool(
@@ -300,7 +346,7 @@ class Config:
         self.correction_enabled = bool(data.get("correction_enabled", True))
         self.correction_url = data.get("correction_url", "http://10.4.190.16")
         self.correction_port = data.get("correction_port", 11434)
-        self.correction_token = data.get("correction_token", "")
+        self.correction_token = get_token("correction", data.get("llm_provider", "Ollama"))
         self.correction_model = data.get(
             "correction_model", "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M"
         )

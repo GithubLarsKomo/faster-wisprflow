@@ -17,6 +17,7 @@ from config import (
     Config,
     _build_base_url,
     delete_corrector_prompt,
+    get_token,
     list_corrector_prompts,
     load_config,
     load_corrector_prompt,
@@ -26,6 +27,7 @@ from config import (
     save_corrector_prompt,
     save_system_prompt,
     save_transcription_initial_prompt,
+    set_token,
 )
 from llm_corrector import LLMCorrector
 from ui.popups import _LLMPopup, _MicLevelPopup
@@ -87,9 +89,13 @@ class SettingsWindow:
             value=str(llm_port_val) if llm_port_val else ""
         )
         self.llm_model_var = tk.StringVar(value=cfg.get("correction_model", ""))
-        self.whisper_token_var = tk.StringVar(value=cfg.get("whisper_token", ""))
+        self.whisper_token_var = tk.StringVar(
+            value=get_token("whisper", cfg.get("whisper_provider", "lokal"))
+        )
         self.whisper_model_var = tk.StringVar(value=cfg.get("whisper_model", ""))
-        self.llm_token_var = tk.StringVar(value=cfg.get("correction_token", ""))
+        self.llm_token_var = tk.StringVar(
+            value=get_token("correction", cfg.get("llm_provider", "Ollama"))
+        )
         self.whisper_provider_var = tk.StringVar(
             value=cfg.get("whisper_provider", "lokal")
         )
@@ -368,13 +374,11 @@ class SettingsWindow:
             else None
         )
         cfg["correction_model"] = self.llm_model_var.get().strip()
-        cfg["whisper_token"] = self.whisper_token_var.get().strip()
         cfg["whisper_model"] = self.whisper_model_var.get().strip()
         cfg["whisper_provider"] = self.whisper_provider_var.get()
         cfg["transcription_guidance_enabled"] = bool(
             self.transcription_guidance_var.get()
         )
-        cfg["correction_token"] = self.llm_token_var.get().strip()
         cfg["llm_provider"] = self.llm_provider_var.get()
         cfg["proxy"] = self.proxy_var.get().strip()
 
@@ -739,7 +743,9 @@ class SettingsWindow:
         ).pack(side="right")
 
         def _update_fields(*_):
-            is_local = self.whisper_provider_var.get() == "lokal"
+            provider = self.whisper_provider_var.get()
+            self.whisper_token_var.set(get_token("whisper", provider))
+            is_local = provider == "lokal"
             for w in (_e_url, _e_port, _e_endpoint, _e_health):
                 w.configure(state="normal" if is_local else "disabled")
             _e_model.configure(state="disabled" if is_local else "normal")
@@ -779,7 +785,11 @@ class SettingsWindow:
             )
             cfg["whisper_endpoint"] = self.endpoint_var.get().strip()
             cfg["health_endpoint"] = self.health_var.get().strip()
-            cfg["whisper_token"] = self.whisper_token_var.get().strip()
+            set_token(
+                "whisper",
+                self.whisper_provider_var.get(),
+                self.whisper_token_var.get().strip(),
+            )
             cfg["whisper_model"] = self.whisper_model_var.get().strip()
             cfg["whisper_provider"] = self.whisper_provider_var.get()
             cfg["transcription_guidance_enabled"] = bool(
@@ -933,7 +943,9 @@ class SettingsWindow:
         )
 
         def _update_llm_fields(*_):
-            is_ollama = self.llm_provider_var.get() == "Ollama"
+            provider = self.llm_provider_var.get()
+            self.llm_token_var.set(get_token("correction", provider))
+            is_ollama = provider == "Ollama"
             for w in (_e_url, _e_port):
                 w.configure(state="normal" if is_ollama else "disabled")
             _lbl_tok.configure(foreground="red" if not is_ollama else "")
@@ -1244,7 +1256,11 @@ class SettingsWindow:
                 else None
             )
             c["correction_model"] = self.llm_model_var.get().strip()
-            c["correction_token"] = self.llm_token_var.get().strip()
+            set_token(
+                "correction",
+                self.llm_provider_var.get(),
+                self.llm_token_var.get().strip(),
+            )
             try:
                 c["temperature"] = float(temp_var.get())
             except ValueError:
