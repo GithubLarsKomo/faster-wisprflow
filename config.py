@@ -196,7 +196,8 @@ DEFAULT_CONFIG = {
     "port": 8009,
     "whisper_token": "",
     "whisper_model": "whisper-large-v3-turbo",
-    "whisper_provider": "lokal",
+    "whisper_provider": "local",
+    "parakeet_model": "nvidia/parakeet-tdt-0.6b-v3",
     "transcription_guidance_enabled": False,
     "whisper_endpoint": "transcribe",
     "health_endpoint": "health",
@@ -310,9 +311,13 @@ class Config:
         self.raw = data
         # One-time migration: move plaintext tokens from config.json to keyring
         _changed = False
+        # Migrate legacy provider name
+        if data.get("whisper_provider") == "lokal":
+            data["whisper_provider"] = "local"
+            _changed = True
         _wt = data.get("whisper_token", "")
         if _wt:
-            set_token("whisper", data.get("whisper_provider", "lokal"), _wt)
+            set_token("whisper", data.get("whisper_provider", "local"), _wt)
             data.pop("whisper_token")
             _changed = True
         _ct = data.get("correction_token", "")
@@ -324,9 +329,10 @@ class Config:
             save_config(data)
         self.whisper_url = data["whisper_url"]
         self.port = data.get("port", None)
-        self.whisper_token = get_token("whisper", data.get("whisper_provider", "lokal"))
+        self.whisper_token = get_token("whisper", data.get("whisper_provider", "local"))
         self.whisper_model = data.get("whisper_model", "")
-        self.whisper_provider = data.get("whisper_provider", "lokal")
+        self.whisper_provider = data.get("whisper_provider", "local")
+        self.parakeet_model = data.get("parakeet_model", "nvidia/parakeet-tdt-0.6b-v3")
         self.transcription_guidance_enabled = bool(
             data.get("transcription_guidance_enabled", False)
         )
@@ -346,7 +352,9 @@ class Config:
         self.correction_enabled = bool(data.get("correction_enabled", True))
         self.correction_url = data.get("correction_url", "http://10.4.190.16")
         self.correction_port = data.get("correction_port", 11434)
-        self.correction_token = get_token("correction", data.get("llm_provider", "Ollama"))
+        self.correction_token = get_token(
+            "correction", data.get("llm_provider", "Ollama")
+        )
         self.correction_model = data.get(
             "correction_model", "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M"
         )

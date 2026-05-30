@@ -7,6 +7,8 @@ a = Analysis(
     binaries=[],
     datas=[('tray_icon.png', '.')],
     hiddenimports=[
+        # ── app modules ────────────────────────────────────────────────────
+        'ssl_setup',
         'config',
         'recorder',
         'whisper_client',
@@ -14,17 +16,45 @@ a = Analysis(
         'text_inserter',
         'vocabulary',
         'tray',
+        # ── ui modules ─────────────────────────────────────────────────────
         'ui',
-        'ui.utils',
-        'ui.overlay',
-        'ui.popups',
-        'ui.settings_window',
+        'ui.dock',
+        'ui.settings_dialog',
+        'ui.theme',
         'ui.translations',
+        'ui.utils',
+        # ── truststore / SSL ───────────────────────────────────────────────
+        # truststore uses ctypes to call Win32 CryptoAPI — no DLLs needed,
+        # but PyInstaller must bundle the Python package.
+        'truststore',
+        '_ssl',
+        'ssl',
+        # ── requests / certifi ────────────────────────────────────────────
+        'certifi',
+        'requests',
+        'urllib3',
+        'charset_normalizer',
+        # ── sounddevice / numpy ────────────────────────────────────────────
+        'sounddevice',
+        'soundfile',
+        'numpy',
+        # ── keyring (Windows Credential Manager) ──────────────────────────
+        'keyring',
+        'keyring.backends.Windows',
     ],
     hookspath=[],
     hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
+    # pyi_rth_ssl.py runs before app.py and patches ssl.SSLContext so that
+    # all HTTPS traffic goes through the Windows Trust Store.  This handles
+    # Cisco Secure Client / Umbrella TLS inspection transparently.
+    runtime_hooks=['pyi_rth_ssl.py'],
+    excludes=[
+        # old tkinter UI — no longer used
+        'tkinter',
+        'ui.overlay',
+        'ui.popups',
+        'ui.settings_window',
+    ],
     noarchive=False,
     optimize=0,
 )

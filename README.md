@@ -62,7 +62,7 @@ Optionale Dateien neben der EXE:
 
 | Schluessel | Standard | Beschreibung |
 |---|---|---|
-| `whisper_provider` | `'lokal'` | `'lokal'`, `'Openrouter'`, `'Groq'` |
+| `whisper_provider` | `'local'` | `'internal'` (NeMo in-process), `'local'` (HTTP server), `'Groq'`, `'Openrouter'` |
 | `whisper_url` | `'http://10.4.190.16'` | Basis-URL (lokal) |
 | `port` | `8009` | Port (0/leer = kein Portanhaengen) |
 | `whisper_endpoint` | `'transcribe'` | Endpunkt-Pfad |

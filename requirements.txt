@@ -5,6 +5,7 @@ charset-normalizer==3.4.7
 idna==3.13
 keyboard==0.13.5
 keyring==25.7.0
+librosa
 mouse==0.7.1
 numpy==2.4.4
 packaging==26.2

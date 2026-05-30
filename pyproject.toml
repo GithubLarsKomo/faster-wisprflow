@@ -12,11 +12,13 @@ dependencies = [
     "pillow>=12.2.0",
     "pyinstaller>=6.20.0",
     "pyperclip>=1.11.0",
+    "pyside6>=6.11.1",
     "pystray>=0.19.5",
     "requests>=2.33.1",
     "ruff>=0.15.12",
     "sounddevice>=0.5.5",
     "soundfile>=0.13.1",
+    "truststore>=0.10.0",
 ]
 
 [tool.pytest.ini_options]
