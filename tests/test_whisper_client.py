@@ -51,13 +51,6 @@ class TestTranscribeRouting:
             result = wc.transcribe(Path("audio.wav"))
         m.assert_called_once()
 
-    def test_routes_to_internal(self):
-        wc = WhisperClient(make_stub_config(whisper_provider="internal"))
-        with patch.object(wc, "_transcribe_internal", return_value="text") as m:
-            result = wc.transcribe(Path("audio.wav"))
-        m.assert_called_once_with(Path("audio.wav"))
-        assert result == "text"
-
     def test_routes_to_custom_for_unknown_provider(self):
         wc = WhisperClient(make_stub_config(whisper_provider="whatever"))
         with patch.object(wc, "_transcribe_custom", return_value="text") as m:
@@ -200,37 +193,6 @@ class TestTranscribeCustom:
         data = mock_post.call_args[1]["data"]
         assert "initial_prompt" in data
         assert "dictation" in data["initial_prompt"].lower()
-
-
-# ---------------------------------------------------------------------------
-# _transcribe_internal
-# ---------------------------------------------------------------------------
-
-
-class TestTranscribeInternal:
-    def test_routes_to_internal_via_transcribe(self):
-        wc = WhisperClient(make_stub_config(whisper_provider="internal"))
-        with patch.object(wc, "_transcribe_internal", return_value="nemo text") as m:
-            result = wc.transcribe(Path("audio.wav"))
-        m.assert_called_once_with(Path("audio.wav"))
-        assert result == "nemo text"
-
-    def test_transcribe_internal_delegates_to_parakeet_engine(self):
-        wc = WhisperClient(
-            make_stub_config(
-                parakeet_model="nvidia/parakeet-tdt-0.6b-v3",
-                language="de",
-                transcription_guidance_enabled=False,
-            )
-        )
-        mock_engine = MagicMock()
-        mock_engine.transcribe_file.return_value = "NeMo result"
-        with patch.dict("sys.modules", {"parakeet_engine": mock_engine}):
-            result = wc._transcribe_internal(Path("audio.wav"))
-        mock_engine.transcribe_file.assert_called_once_with(
-            Path("audio.wav"), "nvidia/parakeet-tdt-0.6b-v3", "de"
-        )
-        assert result == "NeMo result"
 
 
 class TestGuidancePostProcessing:

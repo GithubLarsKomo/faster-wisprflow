@@ -3,11 +3,11 @@
   "port": 8009,
   "whisper_token": "",
   "whisper_model": "whisper-large-v3-turbo",
-  "whisper_provider": "lokal",
+  "whisper_provider": "local",
   "transcription_guidance_enabled": false,
   "whisper_endpoint": "transcribe",
   "health_endpoint": "health",
-  "language": "pt",
+  "language": "de",
   "ui_language": "de",
   "response_format": "text",
   "sample_rate": 16000,
@@ -31,9 +31,7 @@
   "active_corrector_prompt": "default.md",
   "temperature": 0.0,
   "top_p": 1.0,
-  "num_predict": 220,
   "num_ctx": 1024,
-  "repeat_penalty": 1.0,
   "max_tokens": 220,
   "proxy": ""
 }

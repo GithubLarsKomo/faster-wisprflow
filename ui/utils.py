@@ -1,5 +1,4 @@
 import ctypes
-import tkinter as tk
 from ctypes import wintypes
 
 
@@ -33,11 +32,3 @@ def _target_monitor() -> tuple:
     w = ctypes.windll.user32.GetSystemMetrics(0)
     h = ctypes.windll.user32.GetSystemMetrics(1)
     return (0, 0, w, h)
-
-
-def _center_on_target(win: tk.Toplevel, w: int, h: int) -> None:
-    """Position win (w×h) centered on the target monitor."""
-    ml, mt, mr, mb = _target_monitor()
-    x = ml + (mr - ml - w) // 2
-    y = mt + (mb - mt - h) // 2
-    win.geometry(f"{w}x{h}+{x}+{y}")

@@ -9,7 +9,7 @@ import numpy as np
 import requests
 import sounddevice as sd
 import soundfile as sf
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -28,6 +29,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QStyle,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -76,6 +78,7 @@ def _make_dialog(parent: QWidget | None, title: str, w: int, h: int) -> QDialog:
     dlg.setWindowTitle(title)
     dlg.setStyleSheet(SETTINGS_STYLESHEET)
     dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+    dlg.setWindowModality(Qt.WindowModal)
     _center_dialog(dlg, w, h)
     return dlg
 
@@ -261,6 +264,14 @@ class SettingsWindow:
         cur_lang = cfg.get("language", "de")
         if cur_lang in LANG_CODES:
             self._lang_combo.setCurrentText(cur_lang)
+
+        def _autosave_lang(idx: int) -> None:
+            c = load_config()
+            c["language"] = self._lang_combo.itemText(idx)
+            save_config(c)
+            self.app.reload_config()
+
+        self._lang_combo.currentIndexChanged.connect(_autosave_lang)
         aud_form.addRow(tr["target_language"], self._lang_combo)
 
         self._devices: list[tuple[int | None, str]] = []
@@ -375,6 +386,7 @@ class SettingsWindow:
     def save(self) -> None:
         tr = self._tr
         cfg = load_config()
+        old_lang = cfg.get("ui_language", "de")
         hotkey_raw = self._hotkey_edit.text().strip()
         cfg["hotkey_keys"] = [k.strip() for k in hotkey_raw.split("+") if k.strip()]
         cfg["restore_clipboard"] = self._restore_chk.isChecked()
@@ -400,6 +412,10 @@ class SettingsWindow:
         save_config(cfg)
         self.app.reload_config()
         QMessageBox.information(self.win, tr["msg_saved_title"], tr["msg_saved_body"])
+        # Rebuild the window when the UI language changed so all labels update.
+        if cfg.get("ui_language", "de") != old_lang:
+            self.win.close()
+            self.open()
 
     # ── reset ──────────────────────────────────────────────────────────────
     def reset_to_defaults(self) -> None:
@@ -591,7 +607,7 @@ class SettingsWindow:
     def open_transcription_settings(self) -> None:
         tr = self._tr
         cfg = load_config()
-        dlg = _make_dialog(self.win, tr["srv_frame"].strip(), 600, 520)
+        dlg = _make_dialog(self.win, tr["srv_frame"].strip(), 720, 680)
 
         outer = QVBoxLayout(dlg)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -613,7 +629,7 @@ class SettingsWindow:
         form.setLabelAlignment(Qt.AlignRight)
         form.setSpacing(6)
 
-        providers = ["internal", "local", "Groq", "Openrouter"]
+        providers = ["local", "Groq", "Openrouter", "OpenAI"]
         prov_combo = QComboBox()
         prov_combo.addItems(providers)
         cur_prov = cfg.get("whisper_provider", "local")
@@ -652,37 +668,15 @@ class SettingsWindow:
         guidance_chk.setChecked(cfg.get("transcription_guidance_enabled", False))
         form.addRow("", guidance_chk)
 
-        _parakeet_row = form.rowCount()
-        parakeet_model_edit = _edit(
-            cfg.get("parakeet_model", "nvidia/parakeet-tdt-0.6b-v3")
-        )
-        form.addRow(
-            tr.get("parakeet_model_label", "Parakeet Modell"), parakeet_model_edit
-        )
-
-        _hint_row = form.rowCount()
-        _nemo_hint_lbl = _lbl(
-            tr.get(
-                "internal_nemo_hint",
-                "NeMo Parakeet · erkennt Sprache automatisch · kein API-Key nötig",
-            ),
-            muted=True,
-        )
-        _nemo_hint_lbl.setWordWrap(True)
-        form.addRow("", _nemo_hint_lbl)
-
         _http_rows = [_url_row, _port_row, _ep_row, _health_row]
         _cloud_rows = [_token_row, _model_row]
 
         def _on_prov_change(prov: str) -> None:
-            is_internal = prov == "internal"
             is_local = prov == "local"
             for r in _http_rows:
                 form.setRowVisible(r, is_local)
             for r in _cloud_rows:
-                form.setRowVisible(r, not is_internal)
-            form.setRowVisible(_parakeet_row, is_internal)
-            form.setRowVisible(_hint_row, is_internal)
+                form.setRowVisible(r, True)
 
         prov_combo.currentTextChanged.connect(_on_prov_change)
         _on_prov_change(prov_combo.currentText())
@@ -759,7 +753,6 @@ class SettingsWindow:
             c["health_endpoint"] = health_edit.text().strip()
             c["whisper_model"] = model_edit.text().strip()
             c["whisper_provider"] = _cur_prov()
-            c["parakeet_model"] = parakeet_model_edit.text().strip()
             c["transcription_guidance_enabled"] = guidance_chk.isChecked()
             tok = token_edit.text().strip()
             if tok:
@@ -770,30 +763,50 @@ class SettingsWindow:
             QMessageBox.information(dlg, tr["msg_saved_title"], tr["msg_saved_body"])
 
         def _do_health() -> None:
-            if _cur_prov() == "internal":
-                QMessageBox.information(
-                    dlg,
-                    tr["btn_health"],
-                    tr.get(
-                        "internal_nemo_hint",
-                        "NeMo Parakeet · läuft lokal · kein Health-Endpoint",
-                    ),
-                )
-                return
-            c = load_config()
-            c["whisper_url"] = url_edit.text().strip()
+            prov = _cur_prov()
+            tok = token_edit.text().strip()
+            headers = {"Authorization": f"Bearer {tok}"} if tok else {}
             raw_port = port_edit.text().strip()
-            c["port"] = int(raw_port) if raw_port else None
-            c["health_endpoint"] = health_edit.text().strip()
-            base = _build_base_url(c["whisper_url"], c["port"])
-            url = base + c["health_endpoint"]
-            try:
-                r = requests.get(url, timeout=5)
-                QMessageBox.information(
-                    dlg, tr["btn_health"], f"{r.status_code}: {r.text[:200]}"
-                )
-            except Exception as exc:
-                QMessageBox.critical(dlg, tr["msg_health_fail_title"], str(exc))
+            base = _build_base_url(
+                url_edit.text().strip(),
+                int(raw_port) if raw_port else None,
+            )
+            if prov == "local":
+                ep = health_edit.text().strip().lstrip("/")
+                url = base.rstrip("/") + "/" + ep
+            elif prov == "Groq":
+                url = "https://api.groq.com/openai/v1/models"
+            elif prov == "Openrouter":
+                url = "https://openrouter.ai/api/v1/models"
+            elif prov == "OpenAI":
+                url = "https://api.openai.com/v1/models"
+            else:
+                return
+            result_box: list = [None]
+            health_btn.setEnabled(False)
+
+            def _run():
+                try:
+                    r = requests.get(url, headers=headers, timeout=5)
+                    result_box[0] = (r.status_code, r.text[:300])
+                except Exception as exc:
+                    result_box[0] = exc
+
+            threading.Thread(target=_run, daemon=True).start()
+
+            def _check():
+                if result_box[0] is None:
+                    QTimer.singleShot(200, _check)
+                    return
+                health_btn.setEnabled(True)
+                res = result_box[0]
+                if isinstance(res, Exception):
+                    QMessageBox.critical(dlg, tr["msg_health_fail_title"], str(res))
+                else:
+                    status, body = res
+                    QMessageBox.information(dlg, tr["btn_health"], f"{status}: {body}")
+
+            QTimer.singleShot(200, _check)
 
         def _do_whisper_test() -> None:
             if self._testing:
@@ -873,12 +886,15 @@ class SettingsWindow:
                             if frames
                             else np.zeros((1, channels))
                         )
-                    _kick_transcription(audio, rate, channels)
-
-            def _kick_transcription(
-                audio: np.ndarray, rate: int, channels: int
-            ) -> None:
-                import os
+                        audio_rms = float(np.sqrt(np.mean(audio**2)))
+                        if audio_rms < 0.005:
+                            level_dlg.close()
+                            self._testing = False
+                            test_btn.setEnabled(True)
+                            QMessageBox.warning(
+                                dlg, tr["msg_whisper_title"], tr["msg_whisper_no_text"]
+                            )
+                            return
                 import tempfile
 
                 tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
@@ -903,7 +919,6 @@ class SettingsWindow:
                         cfg_obj.whisper_endpoint = ep_edit.text().strip()
                         cfg_obj.whisper_model = model_edit.text().strip()
                         cfg_obj.whisper_provider = _cur_prov()
-                        cfg_obj.parakeet_model = parakeet_model_edit.text().strip()
                         cfg_obj.whisper_token = token_edit.text().strip()
                         cfg_obj.transcription_guidance_enabled = (
                             guidance_chk.isChecked()
@@ -989,6 +1004,7 @@ class SettingsWindow:
             "Groq",
             "Openrouter",
             "OpenAI",
+            "Anthropic",
             "Azure OpenAI",
         ]
         prov_combo = QComboBox()
@@ -999,15 +1015,26 @@ class SettingsWindow:
         llm_form.addRow(tr["provider"], prov_combo)
 
         url_edit = _edit(cfg.get("correction_url", ""))
-        llm_form.addRow(tr["url"], url_edit)
-
         llm_port_val = cfg.get("correction_port", None)
         port_edit = _edit(str(llm_port_val) if llm_port_val else "", width=80)
-        llm_form.addRow(tr["port"], port_edit)
+        url_port_w = _hbox(url_edit, _lbl(tr["port"]), port_edit)
+        _llm_url_row = llm_form.rowCount()
+        llm_form.addRow(tr["url"] + " / " + tr["port"], url_port_w)
 
         token_edit = _edit(get_token("correction", cur_prov))
         token_edit.setEchoMode(QLineEdit.Password)
         llm_form.addRow(tr["token"], token_edit)
+
+        _CLOUD_LLM_PROVIDERS = {"Groq", "Openrouter", "OpenAI", "Anthropic"}
+
+        def _on_llm_prov_change(prov: str) -> None:
+            is_cloud = prov in _CLOUD_LLM_PROVIDERS
+            llm_form.setRowVisible(_llm_url_row, not is_cloud)
+            tok = get_token("correction", prov)
+            token_edit.setText(tok)
+
+        prov_combo.currentTextChanged.connect(_on_llm_prov_change)
+        _on_llm_prov_change(prov_combo.currentText())
 
         # model row with refresh button
         model_edit = _edit(cfg.get("correction_model", ""))
@@ -1020,30 +1047,37 @@ class SettingsWindow:
 
         # ── Model parameters ───────────────────────────────────────────────
         params_box = QGroupBox(" Model Parameters ")
-        params_form = QFormLayout(params_box)
-        params_form.setLabelAlignment(Qt.AlignRight)
-        params_form.setSpacing(6)
+        params_grid = QGridLayout(params_box)
+        params_grid.setSpacing(6)
+        params_grid.setColumnMinimumWidth(1, 80)
+        params_grid.setColumnMinimumWidth(3, 80)
+        params_grid.setColumnStretch(1, 0)
+        params_grid.setColumnStretch(3, 0)
 
-        temp_edit = _edit(str(cfg.get("temperature", "")), width=70)
-        params_form.addRow("temperature", temp_edit)
-
-        top_p_edit = _edit(str(cfg.get("top_p", "")), width=70)
-        params_form.addRow("top_p", top_p_edit)
-
+        temp_edit = _edit(str(cfg.get("temperature", "")), width=80)
+        top_p_edit = _edit(str(cfg.get("top_p", "")), width=80)
         max_tok_edit = _edit(str(cfg.get("max_tokens", "")), width=80)
-        params_form.addRow("max_tokens", max_tok_edit)
-
         num_ctx_edit = _edit(str(cfg.get("num_ctx", "")), width=80)
-        params_form.addRow("num_ctx (Ollama)", num_ctx_edit)
+
+        params_grid.addWidget(_lbl("temperature"), 0, 0, Qt.AlignRight)
+        params_grid.addWidget(temp_edit, 0, 1)
+        params_grid.addWidget(_lbl("top_p"), 0, 2, Qt.AlignRight)
+        params_grid.addWidget(top_p_edit, 0, 3)
+        params_grid.addWidget(_lbl("max_tokens"), 1, 0, Qt.AlignRight)
+        params_grid.addWidget(max_tok_edit, 1, 1)
+        params_grid.addWidget(_lbl("num_ctx (Ollama)"), 1, 2, Qt.AlignRight)
+        params_grid.addWidget(num_ctx_edit, 1, 3)
 
         params_reset_btn = _btn(tr.get("param_reset", "Standard wiederherstellen"))
-        params_form.addRow("", params_reset_btn)
+        params_grid.addWidget(params_reset_btn, 2, 0, 1, 4)
 
         form_lay.addWidget(params_box)
 
         # ── Corrector prompts manager ──────────────────────────────────────
         prompts_box = QGroupBox(tr["corrector_prompts_frame"])
         prompts_outer = QVBoxLayout(prompts_box)
+        prompts_outer.setContentsMargins(8, 8, 8, 8)
+        prompts_outer.setSpacing(6)
 
         active_prompt = cfg.get(
             "active_corrector_prompt", DEFAULT_CORRECTOR_PROMPT_FILE
@@ -1052,10 +1086,10 @@ class SettingsWindow:
         splitter = QSplitter(Qt.Horizontal)
         splitter.setStyleSheet("QSplitter::handle { background: #3f3f50; width: 4px; }")
 
-        # left: list
+        # left: list + vertical icon buttons
         left_w = QWidget()
-        left_lay = QVBoxLayout(left_w)
-        left_lay.setContentsMargins(0, 0, 0, 0)
+        left_lay = QHBoxLayout(left_w)
+        left_lay.setContentsMargins(0, 0, 4, 0)
         left_lay.setSpacing(4)
 
         prompt_list = QListWidget()
@@ -1063,27 +1097,42 @@ class SettingsWindow:
         prompt_list.setMaximumWidth(220)
         left_lay.addWidget(prompt_list)
 
-        list_btns = QHBoxLayout()
-        list_btns.setSpacing(4)
-        new_btn = _btn(tr["corrector_prompt_new"])
-        dup_btn = _btn(tr["corrector_prompt_duplicate"])
-        del_btn = _btn(tr["corrector_prompt_delete"])
-        set_act_btn = _btn(tr["corrector_prompt_set_active"])
-        list_btns.addWidget(new_btn)
-        list_btns.addWidget(dup_btn)
-        list_btns.addWidget(del_btn)
-        list_btns.addStretch()
-        list_btns.addWidget(set_act_btn)
-        left_lay.addLayout(list_btns)
+        _sty = prompt_list.style()
+
+        def _icon_btn(pixmap_enum: QStyle.StandardPixmap, tooltip: str) -> QPushButton:
+            b = QPushButton()
+            b.setIcon(_sty.standardIcon(pixmap_enum))
+            b.setIconSize(QSize(16, 16))
+            b.setFixedSize(28, 28)
+            b.setToolTip(tooltip)
+            return b
+
+        new_btn = _icon_btn(QStyle.SP_FileDialogNewFolder, tr["corrector_prompt_new"])
+        dup_btn = _icon_btn(QStyle.SP_FileLinkIcon, tr["corrector_prompt_duplicate"])
+        del_btn = _icon_btn(QStyle.SP_TrashIcon, tr["corrector_prompt_delete"])
+        set_act_btn = _icon_btn(
+            QStyle.SP_DialogApplyButton, tr["corrector_prompt_set_active"]
+        )
+
+        btn_col = QVBoxLayout()
+        btn_col.setSpacing(6)
+        btn_col.setContentsMargins(2, 2, 2, 2)
+        btn_col.addWidget(new_btn)
+        btn_col.addWidget(dup_btn)
+        btn_col.addWidget(del_btn)
+        btn_col.addStretch()
+        btn_col.addWidget(set_act_btn)
+        left_lay.addLayout(btn_col)
         splitter.addWidget(left_w)
 
         # right: editor
         right_w = QWidget()
         right_lay = QVBoxLayout(right_w)
-        right_lay.setContentsMargins(0, 0, 0, 0)
-        right_lay.setSpacing(4)
+        right_lay.setContentsMargins(6, 0, 0, 0)
+        right_lay.setSpacing(6)
 
         title_row = QHBoxLayout()
+        title_row.setSpacing(6)
         title_lbl = _lbl(tr["corrector_prompt_title_label"])
         title_edit = _edit()
         title_row.addWidget(title_lbl)
@@ -1282,14 +1331,66 @@ class SettingsWindow:
         bb_lay.setContentsMargins(16, 10, 16, 10)
         bb_lay.setSpacing(8)
 
+        health_btn = _btn(tr["btn_health"])
         test_btn = _btn(tr["btn_llm_test"])
         save_btn = _btn(tr["btn_save"], primary=True)
         close_btn = _btn(tr["btn_close"])
+        bb_lay.addWidget(health_btn)
         bb_lay.addWidget(test_btn)
         bb_lay.addStretch()
         bb_lay.addWidget(save_btn)
         bb_lay.addWidget(close_btn)
         outer.addWidget(btn_bar)
+
+        def _do_llm_health() -> None:
+            prov = prov_combo.currentText()
+            tok = token_edit.text().strip()
+            headers = {"Authorization": f"Bearer {tok}"} if tok else {}
+            raw_port = port_edit.text().strip()
+            base = _build_base_url(
+                url_edit.text().strip(),
+                int(raw_port) if raw_port else None,
+            )
+            if prov == "Ollama":
+                url = base.rstrip("/") + "/api/tags"
+            elif prov in ("LM Studio", "Azure OpenAI"):
+                url = base.rstrip("/") + "/v1/models"
+            elif prov == "Groq":
+                url = "https://api.groq.com/openai/v1/models"
+            elif prov == "Openrouter":
+                url = "https://openrouter.ai/api/v1/models"
+            elif prov == "OpenAI":
+                url = "https://api.openai.com/v1/models"
+            elif prov == "Anthropic":
+                url = "https://api.anthropic.com/v1/models"
+                headers = {"x-api-key": tok, "anthropic-version": "2023-06-01"}
+            else:
+                return
+            result_box: list = [None]
+            health_btn.setEnabled(False)
+
+            def _run():
+                try:
+                    r = requests.get(url, headers=headers, timeout=5)
+                    result_box[0] = (r.status_code, r.text[:300])
+                except Exception as exc:
+                    result_box[0] = exc
+
+            threading.Thread(target=_run, daemon=True).start()
+
+            def _check():
+                if result_box[0] is None:
+                    QTimer.singleShot(200, _check)
+                    return
+                health_btn.setEnabled(True)
+                res = result_box[0]
+                if isinstance(res, Exception):
+                    QMessageBox.critical(dlg, tr["msg_health_fail_title"], str(res))
+                else:
+                    status, body = res
+                    QMessageBox.information(dlg, tr["btn_health"], f"{status}: {body}")
+
+            QTimer.singleShot(200, _check)
 
         def _save_llm() -> None:
             c = load_config()
@@ -1335,9 +1436,10 @@ class SettingsWindow:
         def _test_llm() -> None:
             if self._testing:
                 return
-            url = url_edit.text().strip()
             model = model_edit.text().strip()
-            if not url or not model:
+            is_cloud = prov_combo.currentText() in _CLOUD_LLM_PROVIDERS
+            url = url_edit.text().strip()
+            if not model or (not is_cloud and not url):
                 QMessageBox.warning(
                     dlg, tr["msg_llm_test_title"], tr["msg_llm_test_missing"]
                 )
@@ -1389,6 +1491,7 @@ class SettingsWindow:
 
             QTimer.singleShot(200, _check)
 
+        health_btn.clicked.connect(_do_llm_health)
         test_btn.clicked.connect(_test_llm)
         save_btn.clicked.connect(_save_llm)
         close_btn.clicked.connect(dlg.close)

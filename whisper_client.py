@@ -6,9 +6,6 @@ import requests
 
 from config import _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT, Config, _build_base_url
 
-_OPENROUTER_HOST = "openrouter.ai"
-_GROQ_HOST = "groq.com"
-
 
 class WhisperClient:
     """Transcribes audio via one of three backends, auto-detected from ``whisper_url``:
@@ -34,6 +31,9 @@ class WhisperClient:
         return {"http": None, "https": None}
 
     def transcribe(self, audio_path):
+        from pathlib import Path as _Path
+
+        audio_path = _Path(audio_path)
         provider = getattr(self.config, "whisper_provider", "local")
         if provider == "Openrouter":
             text = self._transcribe_openrouter(audio_path)
@@ -41,8 +41,9 @@ class WhisperClient:
         if provider == "Groq":
             text = self._transcribe_groq(audio_path)
             return self._apply_transcription_guidance(text)
-        if provider == "internal":
-            return self._transcribe_internal(audio_path)
+        if provider == "OpenAI":
+            text = self._transcribe_openai(audio_path)
+            return self._apply_transcription_guidance(text)
         text = self._transcribe_custom(audio_path)
         return self._apply_transcription_guidance(text)
 
@@ -99,16 +100,6 @@ class WhisperClient:
         out = self._capitalize_after_breaks(out)
         return out
 
-    def _transcribe_internal(self, audio_path):
-        from parakeet_engine import transcribe_file
-
-        model_name = getattr(
-            self.config, "parakeet_model", "nvidia/parakeet-tdt-0.6b-v3"
-        )
-        language = getattr(self.config, "language", "de")
-        text = transcribe_file(audio_path, model_name, language)
-        return self._apply_transcription_guidance(text)
-
     def _transcribe_openrouter(self, audio_path):
         with open(audio_path, "rb") as f:
             audio_b64 = base64.b64encode(f.read()).decode("utf-8")
@@ -153,6 +144,28 @@ class WhisperClient:
                 data["initial_prompt"] = prompt
             response = requests.post(
                 "https://api.groq.com/openai/v1/audio/transcriptions",
+                headers=headers,
+                files={"file": (audio_path.name, f, "audio/wav")},
+                data=data,
+                timeout=600,
+                proxies=self._proxies(),
+            )
+        response.raise_for_status()
+        return response.json().get("text", "").strip()
+
+    def _transcribe_openai(self, audio_path):
+        with open(audio_path, "rb") as f:
+            headers = {"Authorization": f"Bearer {self.config.whisper_token}"}
+            data = {
+                "model": self.config.whisper_model,
+                "language": self.config.language,
+                "response_format": "json",
+            }
+            if self._guidance_enabled():
+                prompt = self._initial_prompt()
+                data["prompt"] = prompt
+            response = requests.post(
+                "https://api.openai.com/v1/audio/transcriptions",
                 headers=headers,
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,

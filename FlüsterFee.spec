@@ -49,11 +49,7 @@ a = Analysis(
     # Cisco Secure Client / Umbrella TLS inspection transparently.
     runtime_hooks=['pyi_rth_ssl.py'],
     excludes=[
-        # old tkinter UI — no longer used
         'tkinter',
-        'ui.overlay',
-        'ui.popups',
-        'ui.settings_window',
     ],
     noarchive=False,
     optimize=0,

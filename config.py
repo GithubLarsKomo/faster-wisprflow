@@ -197,7 +197,6 @@ DEFAULT_CONFIG = {
     "whisper_token": "",
     "whisper_model": "whisper-large-v3-turbo",
     "whisper_provider": "local",
-    "parakeet_model": "nvidia/parakeet-tdt-0.6b-v3",
     "transcription_guidance_enabled": False,
     "whisper_endpoint": "transcribe",
     "health_endpoint": "health",
@@ -222,19 +221,10 @@ DEFAULT_CONFIG = {
     "active_corrector_prompt": "default.md",
     "temperature": 0,
     "top_p": 1,
-    "num_predict": 220,
     "num_ctx": 1024,
-    "repeat_penalty": 1.0,
     "max_tokens": 220,
     "proxy": "",
 }
-
-
-def is_admin():
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except BaseException:
-        return False
 
 
 def auto_elevate_if_needed(config):
@@ -332,7 +322,6 @@ class Config:
         self.whisper_token = get_token("whisper", data.get("whisper_provider", "local"))
         self.whisper_model = data.get("whisper_model", "")
         self.whisper_provider = data.get("whisper_provider", "local")
-        self.parakeet_model = data.get("parakeet_model", "nvidia/parakeet-tdt-0.6b-v3")
         self.transcription_guidance_enabled = bool(
             data.get("transcription_guidance_enabled", False)
         )
@@ -361,9 +350,7 @@ class Config:
         self.llm_provider = data.get("llm_provider", "Ollama")
         self.temperature = data.get("temperature", 0)
         self.top_p = data.get("top_p", 1)
-        self.num_predict = data.get("num_predict", 220)
         self.num_ctx = data.get("num_ctx", 1024)
-        self.repeat_penalty = data.get("repeat_penalty", 1.0)
         self.max_tokens = data.get("max_tokens", 220)
         self.active_corrector_prompt = data.get(
             "active_corrector_prompt", DEFAULT_CORRECTOR_PROMPT_FILE

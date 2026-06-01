@@ -3,16 +3,30 @@
 from __future__ import annotations
 
 import ctypes
-import ctypes.wintypes
 import time
 from enum import Enum, auto
 
-from PySide6.QtCore import (Property, QEasingCurve, QEvent, QPoint,
-                            QPropertyAnimation, QRect, QSize, Qt, QTimer,
-                            Signal)
+from PySide6.QtCore import (
+    Property,
+    QEasingCurve,
+    QEvent,
+    QPoint,
+    QPropertyAnimation,
+    QRect,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QApplication, QComboBox, QHBoxLayout, QLabel,
-                               QToolButton, QWidget)
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QToolButton,
+    QWidget,
+)
 
 from ui import theme as T
 from ui.translations import TRANSLATIONS
@@ -132,6 +146,12 @@ class _DockBar(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
 
+        # Clear entire widget to transparent so corners outside the pill are
+        # not filled with the system background colour.
+        p.setCompositionMode(QPainter.CompositionMode_Clear)
+        p.fillRect(self.rect(), Qt.transparent)
+        p.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
         bg_map = {
             DockState.STRIP: T.ACCENT,
             DockState.IDLE: T.DOCK_BG,
@@ -161,38 +181,18 @@ class _DockBar(QWidget):
         p.end()
 
 
-# ── Win32 acrylic / blur-behind ───────────────────────────────────────────────
+# ── Win32 transparent outer-shell helper ────────────────────────────────────
 
 
-def _try_acrylic(hwnd: int) -> None:
-    """Attempt to enable DWM acrylic blur on Windows 10+."""
-    try:
+class _MSG(ctypes.Structure):
+    """Minimal Win32 MSG layout for nativeEvent parsing."""
 
-        class _ACCENT(ctypes.Structure):
-            _fields_ = [
-                ("AccentState", ctypes.c_int),
-                ("AccentFlags", ctypes.c_int),
-                ("GradientColor", ctypes.c_uint),
-                ("AnimationId", ctypes.c_int),
-            ]
-
-        class _WINCOMP(ctypes.Structure):
-            _fields_ = [
-                ("Attribute", ctypes.c_int),
-                ("Data", ctypes.c_void_p),
-                ("SizeOfData", ctypes.c_ulong),
-            ]
-
-        accent = _ACCENT()
-        accent.AccentState = 4  # ACCENT_ENABLE_ACRYLICBLURBEHIND
-        accent.GradientColor = 0xCC1C1C22  # ARGB
-        data = _WINCOMP()
-        data.Attribute = 19  # WCA_ACCENT_POLICY
-        data.SizeOfData = ctypes.sizeof(accent)
-        data.Data = ctypes.cast(ctypes.pointer(accent), ctypes.c_void_p)
-        ctypes.windll.user32.SetWindowCompositionAttribute(hwnd, ctypes.pointer(data))
-    except Exception:  # noqa: BLE001
-        pass
+    _fields_ = [
+        ("hwnd", ctypes.c_void_p),
+        ("message", ctypes.c_uint),
+        ("wParam", ctypes.c_size_t),
+        ("lParam", ctypes.c_ssize_t),
+    ]
 
 
 # ── Main dock window ─────────────────────────────────────────────────────────
@@ -224,11 +224,16 @@ class DockWindow(QWidget):
             None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_NoSystemBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
+        self.setAutoFillBackground(False)
 
         # Fixed-size transparent outer shell.  The bar is a child widget and
         # is the only thing that animates — no OS window moves during transitions.
         self._bar = _DockBar(self)
+        self._bar.setAttribute(Qt.WA_TranslucentBackground)
+        self._bar.setAttribute(Qt.WA_NoSystemBackground)
+        self._bar.setAutoFillBackground(False)
         self._setup_outer_geometry()
 
         self._config = config
@@ -283,12 +288,26 @@ class DockWindow(QWidget):
         self._dot_timer.timeout.connect(self._cycle_dots)
 
         self.show()
-        QTimer.singleShot(50, self._apply_acrylic)
 
-    # ── backward compat property ───────────────────────────────────────────
-    @property
-    def top(self) -> "DockWindow":
-        return self
+    # ── transparent-surround pass-through ──────────────────────────────────
+    def nativeEvent(self, event_type: bytes, message: int) -> tuple:  # noqa: N802
+        """Return HTTRANSPARENT for clicks outside the bar pill so they fall
+        through to the window underneath, while keeping the bar itself clickable."""
+        if event_type == b"windows_generic_MSG":
+            _WM_NCHITTEST = 0x0084
+            _HTTRANSPARENT = -1
+            try:
+                msg = _MSG.from_address(int(message))
+                if msg.message == _WM_NCHITTEST:
+                    lp = msg.lParam
+                    x = ctypes.c_int16(lp & 0xFFFF).value
+                    y = ctypes.c_int16((lp >> 16) & 0xFFFF).value
+                    local = self.mapFromGlobal(QPoint(x, y))
+                    if not self._bar.geometry().contains(local):
+                        return True, _HTTRANSPARENT
+            except Exception:  # noqa: BLE001
+                pass
+        return super().nativeEvent(event_type, message)
 
     # ── outer shell geometry (set once, never changes) ───────────────────────
     def _setup_outer_geometry(self) -> None:
@@ -512,6 +531,10 @@ class DockWindow(QWidget):
             return
         if getattr(self, "_animating", False):
             return
+        # Freeze hover behaviour while any modal dialog (settings, etc.) is open.
+        if QApplication.activeModalWidget() is not None:
+            self._leave_timer.stop()
+            return
         cursor = QCursor.pos()
         # Use _bar's global rect so hover detection is independent of
         # DockWindow's (fixed, larger) outer geometry.
@@ -536,6 +559,8 @@ class DockWindow(QWidget):
 
     def _on_leave_timeout(self) -> None:
         if self._state == DockState.IDLE:
+            if QApplication.activeModalWidget() is not None:
+                return
             self._goto_state(DockState.STRIP)
 
     # ── public API (matches _MicLevelPopup interface) ──────────────────────
@@ -562,13 +587,6 @@ class DockWindow(QWidget):
         )
         self._goto_state(DockState.PROCESSING)
         self._dot_timer.start()
-
-    def expand_for_dots(self) -> None:
-        """Transition to PROCESSING state (replaces expand_for_dots in popups)."""
-        self.set_processing()
-
-    def show_dots(self, n: int) -> None:
-        """Legacy no-op — dot animation is managed internally."""
 
     def set_done(self, hold_ms: int = T.DONE_HOLD_MS) -> None:
         self._dot_timer.stop()
@@ -661,10 +679,6 @@ class DockWindow(QWidget):
         from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.information(None, title, body)
-
-    def _apply_acrylic(self) -> None:
-        hwnd = int(self.winId())
-        _try_acrylic(hwnd)
 
     # ── painting ───────────────────────────────────────────────────────────
     def paintEvent(self, _event) -> None:  # noqa: N802
