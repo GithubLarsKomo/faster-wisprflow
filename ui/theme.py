@@ -7,7 +7,19 @@ DOCK_BG = QColor(28, 28, 34, 220)
 DOCK_BG_REC = QColor(35, 22, 30, 230)
 DOCK_BG_DONE = QColor(20, 80, 56, 220)
 DOCK_BG_ERR = QColor(65, 18, 18, 220)
+# Default border for states without an explicit accent (IDLE, PROCESSING,
+# CORRECTING) — barely visible white that disappears on dark backgrounds.
+# The dock paintEvent overrides this with DOCK_BORDER_STRIP for the
+# collapsed/closed strip state so the dock remains visible on a black
+# desktop even when the user isn't hovering over it.
 DOCK_BORDER = QColor(255, 255, 255, 22)
+# Bright violet border for the closed/collapsed STRIP state. The strip
+# is shown when the mouse is NOT over the dock, and its background is
+# the same dark (28,28,34) as the idle dock — a faint white-22-alpha
+# border disappears entirely on most dark mode desktops, so the dock
+# looks like a dark blob when collapsed. A bright violet 1px outline
+# gives the closed dock a clear silhouette so the user can find it.
+DOCK_BORDER_STRIP = QColor(167, 139, 250, 255)  # ~violet-400, fully opaque
 
 ACCENT = QColor(139, 92, 246)
 ACCENT_GLOW = QColor(139, 92, 246, 55)
@@ -44,7 +56,7 @@ LEAVE_DELAY_MS = 2000  # ms before collapsing
 # ── Animation durations ───────────────────────────────────────────────────────
 ANIM_EXPAND_MS = 180
 ANIM_COLLAPSE_MS = 260
-DONE_HOLD_MS = 1500
+DONE_HOLD_MS = 600
 ERROR_HOLD_MS = 3000
 
 # ── Settings dialog stylesheet ────────────────────────────────────────────────

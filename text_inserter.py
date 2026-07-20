@@ -333,8 +333,15 @@ class TextInserter:
         return prev_char in ".!?;:\n\r"
 
     def _peek_previous_non_space_char(self, lookback: int = 8) -> str | None:
-        """Try to read a short left context by selecting/copying text before the caret."""
+        """Try to read a short left context by selecting/copying text before the caret.
+
+        The clipboard is saved before the peek and restored immediately after
+        reading the snippet, so the caller still sees the *original* clipboard
+        content (the peek must not pollute the saved state used by
+        ``insert_text``).
+        """
         sentinel = "__FWF_PREV_CHAR_SENTINEL__"
+        saved = _get_clipboard_text()
         if not _set_clipboard_text(sentinel):
             return None
 
@@ -347,6 +354,23 @@ class TextInserter:
         snippet = _get_clipboard_text()
         for _ in range(max(1, int(lookback))):
             _send_right()
+
+        # Restore the original clipboard *immediately* so insert_text() can
+        # later save and restore it without the peek interfering.
+        if saved is not None:
+            _set_clipboard_text(saved)
+        else:
+            # Nothing was on the clipboard before — clear it so _get_clipboard_text
+            # in insert_text() returns None and we don't accidentally restore the
+            # peek's selection back to the user.
+            for _attempt in range(3):
+                if _u32.OpenClipboard(None):
+                    try:
+                        _u32.EmptyClipboard()
+                    finally:
+                        _u32.CloseClipboard()
+                    break
+                time.sleep(0.04 * (_attempt + 1))
 
         if not snippet or snippet == sentinel:
             return None
@@ -377,24 +401,46 @@ class TextInserter:
         # 2. Is Word in the foreground?
         is_word = _foreground_exe() == "winword.exe"
 
-        # 3. Write our text to clipboard
+        # 3. Write our text to clipboard. Retry with a longer total budget —
+        # the previous 8 × 0.04s backoff was too short when the foreground
+        # app (Word, a heavy IDE, an RDP window) is still settling from the
+        # hotkey release and briefly holds the clipboard. If we give up
+        # silently, Ctrl+V then pastes the *old* clipboard contents — the
+        # user sees "the prior clipboard was pasted" which is exactly the
+        # bug report.
         if not _set_clipboard_text(text):
             # Fallback: pyperclip (shouldn't normally be needed)
             try:
                 import pyperclip
 
                 pyperclip.copy(text)
+                # Give the clipboard manager a moment to actually commit the
+                # write before we post the Ctrl+V keystroke.
+                time.sleep(0.08)
             except Exception:
                 return
-        time.sleep(0.06)
 
-        # 4. Send Ctrl+V
+        # 4. Give the OS clipboard subsystem a chance to publish the new
+        # data across processes before we post Ctrl+V. 60ms was too short
+        # for slow targets (browser inputs, RDP, terminal apps).
+        time.sleep(0.12)
+
+        # 5. Send Ctrl+V
         _send_ctrl_v()
 
-        # 5. Wait for paste to be processed
-        delay = 0.15 + (self.WORD_EXTRA_DELAY if is_word else 0.0)
+        # 6. Wait for the paste to be processed. Word needs an extra delay
+        # because of its protected-paste path; other targets need at least
+        # ~250ms to consume the clipboard reliably.
+        delay = 0.25 + (self.WORD_EXTRA_DELAY if is_word else 0.0)
         time.sleep(delay)
 
-        # 6. Restore clipboard
+        # 7. Restore clipboard — only if it isn't already what we'd restore
+        # to (avoids an unnecessary write that can race with the target app).
         if self.config.restore_clipboard and old_text is not None:
-            _set_clipboard_text(old_text)
+            # Don't blindly overwrite — if the target app already read the
+            # clipboard, leaving the new text in place is harmless. We only
+            # restore when the current clipboard is still our text (i.e.
+            # the user hasn't copied something else in the meantime).
+            current = _get_clipboard_text()
+            if current == text:
+                _set_clipboard_text(old_text)

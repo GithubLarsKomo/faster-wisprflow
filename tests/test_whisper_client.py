@@ -104,7 +104,14 @@ class TestTranscribeCustom:
             result = wc._transcribe_custom(audio_path)
 
         url = mock_post.call_args[0][0]
+        # language and task are passed as multipart form fields — the
+        # standard OpenAI-Whisper contract that faster-whisper-server
+        # and most custom Whisper-compatible endpoints honour.
         assert url == "http://localhost:8009/transcribe"
+        # Verify the form fields include language=de and task=transcribe
+        form_data = mock_post.call_args[1]["data"]
+        assert form_data["language"] == "de"
+        assert form_data["task"] == "transcribe"
         assert result == "Transcribed text"
 
     def test_bearer_token_in_header(self):

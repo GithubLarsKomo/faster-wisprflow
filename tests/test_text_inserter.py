@@ -173,13 +173,22 @@ class TestTextInserter:
     def test_restores_clipboard_when_enabled(self):
         ti = self._make(restore_clipboard=True)
         set_calls = []
+        get_calls = [0]
 
         def fake_set(text, *args, **kwargs):
             set_calls.append(text)
             return True
 
+        # First _get_clipboard_text call returns the original "old" clipboard;
+        # second call (after the paste, used as a guard before restoring)
+        # returns the text we just wrote — so the inserter knows nothing
+        # else copied over our text in the meantime and proceeds to restore.
+        def fake_get():
+            get_calls[0] += 1
+            return "new text" if get_calls[0] > 1 else "old"
+
         with (
-            patch("text_inserter._get_clipboard_text", return_value="old"),
+            patch("text_inserter._get_clipboard_text", side_effect=fake_get),
             patch("text_inserter._set_clipboard_text", side_effect=fake_set),
             patch("text_inserter._send_ctrl_v"),
             patch("text_inserter._foreground_exe", return_value="notepad.exe"),
@@ -242,7 +251,9 @@ class TestTextInserter:
             ti.insert_text("test")
 
         total_sleep = sum(sleep_calls)
-        assert total_sleep < 0.15 + TextInserter.WORD_EXTRA_DELAY
+        # New timing: 0.12s pre-paste + 0.25s post-paste (+ WORD_EXTRA_DELAY
+        # if Word is the foreground app). 0.37s total for non-Word targets.
+        assert total_sleep < 0.12 + 0.25 + TextInserter.WORD_EXTRA_DELAY + 0.05
 
     def test_guidance_capitalizes_after_sentence_punctuation(self):
         ti = self._make(

@@ -101,11 +101,19 @@ class LLMCorrector:
     def _post_openai_compat(self, headers: dict, payload: dict) -> "requests.Response":
         """POST to the chat-completions URL; if the server rejects the
         ``reasoning`` suppression flag (400 + 'mandatory'), retry once
-        without it."""
+        without it.
+
+        The timeout is a ``(connect, read)`` tuple — 5 s to establish the
+        socket, 30 s to receive the full response. This is critical for
+        Ollama: a slow local model can legitimately take >30 s for the
+        first token, so we want to give it a chance to respond while
+        still bounding the wait.
+        """
+        timeout = (5, 30)
         resp = requests.post(
             self._chat_url(),
             json=payload,
-            timeout=30,
+            timeout=timeout,
             headers=headers,
             proxies=self._proxies(),
         )
@@ -118,7 +126,7 @@ class LLMCorrector:
             resp = requests.post(
                 self._chat_url(),
                 json=payload,
-                timeout=30,
+                timeout=timeout,
                 headers=headers,
                 proxies=self._proxies(),
             )
@@ -142,7 +150,7 @@ class LLMCorrector:
             resp = requests.post(
                 self._chat_url(),
                 json=payload,
-                timeout=30,
+                timeout=(5, 30),
                 headers=headers,
                 proxies=self._proxies(),
             )
@@ -199,7 +207,7 @@ class LLMCorrector:
             resp = requests.post(
                 self._chat_url(),
                 json=payload,
-                timeout=30,
+                timeout=(5, 30),
                 headers=headers,
                 proxies=self._proxies(),
             )

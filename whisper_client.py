@@ -124,7 +124,7 @@ class WhisperClient:
             "https://openrouter.ai/api/v1/audio/transcriptions",
             headers=headers,
             data=payload,
-            timeout=600,
+            timeout=(5, 30),
             proxies=self._proxies(),
         )
         response.raise_for_status()
@@ -147,7 +147,7 @@ class WhisperClient:
                 headers=headers,
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,
-                timeout=600,
+                timeout=(5, 30),
                 proxies=self._proxies(),
             )
         response.raise_for_status()
@@ -169,7 +169,7 @@ class WhisperClient:
                 headers=headers,
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,
-                timeout=600,
+                timeout=(5, 30),
                 proxies=self._proxies(),
             )
         response.raise_for_status()
@@ -183,6 +183,7 @@ class WhisperClient:
                 headers["Authorization"] = f"Bearer {self.config.whisper_token}"
             data = {
                 "language": self.config.language,
+                "task": "transcribe",  # never translate by default
                 "response_format": self.config.response_format,
             }
             if self._guidance_enabled():
@@ -190,10 +191,10 @@ class WhisperClient:
                 data["prompt"] = prompt
                 data["initial_prompt"] = prompt
             response = requests.post(
-                base + "/" + self.config.whisper_endpoint.lstrip("/"),
+                f"{base}/{self.config.whisper_endpoint.lstrip('/')}",
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,
-                timeout=600,
+                timeout=(5, 30),
                 headers=headers,
             )
         response.raise_for_status()

@@ -92,7 +92,7 @@ class TestStop:
         rec.recording = False
         rec.frames = []
 
-        with patch("recorder.BASE_DIR", tmp_path):
+        with patch("recorder.tempfile.gettempdir", return_value=str(tmp_path)):
             with pytest.raises(RuntimeError, match="no_audio"):
                 rec.stop()
 
@@ -104,7 +104,7 @@ class TestStop:
 
         import soundfile as sf_mock
 
-        with patch("recorder.BASE_DIR", tmp_path):
+        with patch("recorder.tempfile.gettempdir", return_value=str(tmp_path)):
             path = rec.stop()
 
         # soundfile is stubbed — verify sf.write was called with the right path

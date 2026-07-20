@@ -1,10 +1,12 @@
+import tempfile
 import threading
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
 
-from config import BASE_DIR, Config
+from config import Config
 
 
 class Recorder:
@@ -48,7 +50,7 @@ class Recorder:
             self.stream.close()
             self.stream = None
 
-        audio_path = BASE_DIR / self.config.audio_filename
+        audio_path = Path(tempfile.gettempdir()) / self.config.audio_filename
 
         with self.lock:
             if not self.frames:

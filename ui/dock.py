@@ -125,7 +125,8 @@ class DockState(Enum):
     STRIP = auto()
     IDLE = auto()
     RECORDING = auto()
-    PROCESSING = auto()
+    PROCESSING = auto()  # transcribing (Whisper)
+    CORRECTING = auto()  # LLM correction in progress
     DONE = auto()
     ERROR = auto()
 
@@ -171,7 +172,7 @@ class _DockBar(QWidget):
         p.fillPath(path, bg)
 
         border_col = {
-            DockState.STRIP: T.ACCENT,
+            DockState.STRIP: T.DOCK_BORDER_STRIP,
             DockState.RECORDING: T.REC_RED,
             DockState.DONE: T.SUCCESS_GREEN,
             DockState.ERROR: T.ERROR_RED,
@@ -206,10 +207,21 @@ class DockWindow(QWidget):
 
     open_settings_requested = Signal()
     quit_requested = Signal()
+    cancel_requested = Signal()  # emitted by the ✕ button during recording/processing
     config_saved = Signal()
     show_error_signal = Signal(str)
     show_info_signal = Signal(str, str)  # title, body
     llm_toggled = Signal(bool)  # emitted when the LLM badge is clicked
+
+    # ── thread-safe dock-state helpers ────────────────────────────────────
+    # The worker thread (which runs transcribe/insert) must NEVER call the
+    # dock's state methods directly. The set_correcting / set_done /
+    # set_idle / set_processing methods touch QWidget state and must run on
+    # the main thread. Emitting these signals from the worker is the
+    # canonical Qt-safe way to schedule them on the dock's thread.
+    _correcting_requested = Signal()
+    _done_requested = Signal()
+    _idle_requested = Signal(int)  # delay_ms
 
     def __init__(
         self,
@@ -260,6 +272,14 @@ class DockWindow(QWidget):
 
         self.show_error_signal.connect(self.show_error)
         self.show_info_signal.connect(self._show_info_slot)
+
+        # Wire the thread-safe state-request signals to the actual methods.
+        # Qt's signal-slot system automatically delivers the slot invocation
+        # on the receiver's thread (the main thread for the dock), so the
+        # worker thread can safely emit these.
+        self._correcting_requested.connect(self.set_correcting)
+        self._done_requested.connect(self.set_done)
+        self._idle_requested.connect(self._on_idle_requested)
 
         # ── build UI ───────────────────────────────────────────────────────
         self._build_ui()  # builds layout inside self._bar
@@ -421,7 +441,11 @@ class DockWindow(QWidget):
         self._settings_btn.clicked.connect(self.open_settings_requested)
         layout.addWidget(self._settings_btn)
 
-        # Close button
+        # Close / Cancel button — always visible. Clicking it while the dock
+        # is RECORDING or PROCESSING cancels the current run (the worker is
+        # aborted, the dock returns to IDLE). Clicking it while IDLE/STRIP
+        # quits the app. This guarantees the user can never get stuck without
+        # a way out.
         self._close_btn = QToolButton()
         self._close_btn.setText("✕")
         self._close_btn.setFixedSize(24, 24)
@@ -430,8 +454,19 @@ class DockWindow(QWidget):
             "font-size: 13px; border-radius: 6px; } "
             "QToolButton:hover { background: rgba(239,68,68,60); color: #f87171; }"
         )
-        self._close_btn.clicked.connect(self.quit_requested)
+        self._close_btn.clicked.connect(self._on_close_clicked)
         layout.addWidget(self._close_btn)
+
+    def _on_close_clicked(self) -> None:
+        """✕ button: cancel in-flight run, or quit if idle."""
+        if self._state in (
+            DockState.RECORDING,
+            DockState.PROCESSING,
+            DockState.CORRECTING,
+        ):
+            self.cancel_requested.emit()
+        else:
+            self.quit_requested.emit()
 
     # ── language / config ──────────────────────────────────────────────────
     def _apply_language(self, lang: str) -> None:
@@ -462,6 +497,7 @@ class DockWindow(QWidget):
             DockState.IDLE: (T.IDLE_W, T.IDLE_H),
             DockState.RECORDING: (T.REC_W, T.REC_H),
             DockState.PROCESSING: (T.PROC_W, T.PROC_H),
+            DockState.CORRECTING: (T.PROC_W, T.PROC_H),
             DockState.DONE: (T.DONE_W, T.DONE_H),
             DockState.ERROR: (T.ERR_W, T.ERR_H),
         }
@@ -474,7 +510,12 @@ class DockWindow(QWidget):
     def _update_widget_visibility(self) -> None:
         s = self._state
         is_idle_or_rec = s in (DockState.IDLE, DockState.RECORDING)
-        is_status = s in (DockState.PROCESSING, DockState.DONE, DockState.ERROR)
+        is_status = s in (
+            DockState.PROCESSING,
+            DockState.CORRECTING,
+            DockState.DONE,
+            DockState.ERROR,
+        )
         is_strip = s == DockState.STRIP
         self._lang_combo.setVisible(is_idle_or_rec)
         self._provider_lbl.setVisible(is_idle_or_rec)
@@ -483,12 +524,11 @@ class DockWindow(QWidget):
         self._timer_lbl.setVisible(s == DockState.RECORDING)
         self._status_lbl.setVisible(is_status)
         self._settings_btn.setVisible(is_idle_or_rec)
-        self._close_btn.setVisible(is_idle_or_rec)
+        # Close/Cancel button is always visible so the user always has an
+        # escape hatch, even while the worker is stuck.
+        self._close_btn.setVisible(not is_strip)
         # LLM badge follows idle/rec visibility and is suppressed in strip state
-        if is_strip:
-            self._llm_lbl.setVisible(False)
-        elif self._llm_active or self._llm_lbl.isVisible():
-            self._llm_lbl.setVisible(is_idle_or_rec)
+        self._llm_lbl.setVisible(not is_strip and is_idle_or_rec)
 
     # ── geometry helpers ───────────────────────────────────────────────────
     def _dock_rect(self, w: int, h: int) -> QRect:
@@ -579,6 +619,37 @@ class DockWindow(QWidget):
         self._on_timeout_cb = None
         self._goto_state(DockState.IDLE)
 
+    # ── thread-safe wrappers ──────────────────────────────────────────────
+    # These are safe to call from ANY thread. They emit Qt signals that are
+    # delivered to the dock's own thread (the GUI thread) automatically by
+    # Qt's signal-slot mechanism. The actual state transitions therefore
+    # always happen on the GUI thread, even when called from a background
+    # worker. This is the canonical Qt pattern and replaces the unreliable
+    # QTimer.singleShot(0, callable) approach that occasionally dropped
+    # events when the worker thread was in a transient bad state.
+    def mark_correcting(self) -> None:
+        """Switch the dock to the CORRECTING state from any thread."""
+        self._correcting_requested.emit()
+
+    def mark_done(self) -> None:
+        """Switch the dock to the DONE state from any thread."""
+        self._done_requested.emit()
+
+    def mark_idle(self) -> None:
+        """Switch the dock to the IDLE state from any thread."""
+        self._idle_requested.emit(0)
+
+    def schedule_idle(self, delay_ms: int) -> None:
+        """Switch the dock to IDLE after *delay_ms* ms, from any thread."""
+        self._idle_requested.emit(int(delay_ms))
+
+    def _on_idle_requested(self, delay_ms: int) -> None:
+        """Slot for _idle_requested — runs on the dock's thread (GUI)."""
+        if delay_ms <= 0:
+            self.set_idle()
+        else:
+            QTimer.singleShot(delay_ms, self.set_idle)
+
     def set_processing(self) -> None:
         self._rec_timer.stop()
         self._status_lbl.setText("●●●")
@@ -586,6 +657,21 @@ class DockWindow(QWidget):
             "QLabel { color: #93c5fd; font-size: 14px; background: transparent; }"
         )
         self._goto_state(DockState.PROCESSING)
+        self._dot_timer.start()
+
+    def set_correcting(self) -> None:
+        """Indicate that LLM correction is in progress.
+
+        Shown after transcription succeeded but before the LLM step
+        completes. Without this state, the user can't tell whether the
+        indicator is frozen (slow LLM) or still actively transcribing.
+        """
+        self._rec_timer.stop()
+        self._status_lbl.setText("●●●")
+        self._status_lbl.setStyleSheet(
+            "QLabel { color: #c084fc; font-size: 14px; background: transparent; }"
+        )
+        self._goto_state(DockState.CORRECTING)
         self._dot_timer.start()
 
     def set_done(self, hold_ms: int = T.DONE_HOLD_MS) -> None:

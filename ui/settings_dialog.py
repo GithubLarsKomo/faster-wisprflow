@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import tempfile
 import threading
 import time
 
@@ -10,53 +12,22 @@ import requests
 import sounddevice as sd
 import soundfile as sf
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QDialog,
-    QDialogButtonBox,
-    QFormLayout,
-    QFrame,
-    QGridLayout,
-    QGroupBox,
-    QHBoxLayout,
-    QLabel,
-    QLineEdit,
-    QListWidget,
-    QMessageBox,
-    QProgressBar,
-    QPushButton,
-    QScrollArea,
-    QSizePolicy,
-    QSplitter,
-    QStyle,
-    QTableWidget,
-    QTableWidgetItem,
-    QTextEdit,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+                               QFormLayout, QFrame, QGridLayout, QGroupBox,
+                               QHBoxLayout, QLabel, QLineEdit, QListWidget,
+                               QMessageBox, QProgressBar, QPushButton,
+                               QScrollArea, QSizePolicy, QSplitter, QStyle,
+                               QTableWidget, QTableWidgetItem, QTextEdit,
+                               QVBoxLayout, QWidget)
 
-from config import (
-    _DEFAULT_SYSTEM_PROMPT,
-    _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT,
-    DEFAULT_CONFIG,
-    DEFAULT_CORRECTOR_PROMPT_FILE,
-    Config,
-    _build_base_url,
-    delete_corrector_prompt,
-    get_token,
-    list_corrector_prompts,
-    load_config,
-    load_corrector_prompt,
-    load_system_prompt,
-    load_transcription_initial_prompt,
-    save_config,
-    save_corrector_prompt,
-    save_system_prompt,
-    save_transcription_initial_prompt,
-    set_token,
-)
+from config import (_DEFAULT_SYSTEM_PROMPT,
+                    _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT, DEFAULT_CONFIG,
+                    DEFAULT_CORRECTOR_PROMPT_FILE, Config, _build_base_url,
+                    delete_corrector_prompt, get_token, list_corrector_prompts,
+                    load_config, load_corrector_prompt, load_system_prompt,
+                    load_transcription_initial_prompt, save_config,
+                    save_corrector_prompt, save_system_prompt,
+                    save_transcription_initial_prompt, set_token)
 from llm_corrector import LLMCorrector
 from ui.theme import SETTINGS_STYLESHEET
 from ui.translations import LANG_CODES, TRANSLATIONS
@@ -895,66 +866,89 @@ class SettingsWindow:
                                 dlg, tr["msg_whisper_title"], tr["msg_whisper_no_text"]
                             )
                             return
-                import tempfile
 
-                tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-                tmp.close()
-                try:
-                    sf.write(tmp.name, audio, rate)
-                except Exception as exc:
-                    level_dlg.close()
-                    self._testing = False
-                    test_btn.setEnabled(True)
-                    QMessageBox.critical(dlg, tr["msg_whisper_fail_title"], str(exc))
-                    return
-
-                result_box: list[str | Exception | None] = [None]
-
-                def _run():
+                    tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                    tmp.close()
                     try:
-                        cfg_obj = Config()
-                        cfg_obj.whisper_url = url_edit.text().strip()
-                        raw_port = port_edit.text().strip()
-                        cfg_obj.port = int(raw_port) if raw_port else None
-                        cfg_obj.whisper_endpoint = ep_edit.text().strip()
-                        cfg_obj.whisper_model = model_edit.text().strip()
-                        cfg_obj.whisper_provider = _cur_prov()
-                        cfg_obj.whisper_token = token_edit.text().strip()
-                        cfg_obj.transcription_guidance_enabled = (
-                            guidance_chk.isChecked()
-                        )
-                        cfg_obj.transcription_initial_prompt = prompt_edit.toPlainText()
-                        result_box[0] = WhisperClient(cfg_obj).transcribe(tmp.name)
+                        sf.write(tmp.name, audio, rate)
                     except Exception as exc:
-                        result_box[0] = exc
-                    finally:
-                        try:
-                            os.unlink(tmp.name)
-                        except OSError:
-                            pass
-
-                threading.Thread(target=_run, daemon=True).start()
-
-                def _check_result():
-                    if result_box[0] is None:
-                        QTimer.singleShot(200, _check_result)
-                        return
-                    level_dlg.close()
-                    self._testing = False
-                    test_btn.setEnabled(True)
-                    res = result_box[0]
-                    if isinstance(res, Exception):
+                        level_dlg.close()
+                        self._testing = False
+                        test_btn.setEnabled(True)
                         QMessageBox.critical(
-                            dlg, tr["msg_whisper_fail_title"], str(res)
+                            dlg, tr["msg_whisper_fail_title"], str(exc)
                         )
-                    elif not res:
-                        QMessageBox.warning(
-                            dlg, tr["msg_whisper_title"], tr["msg_whisper_no_text"]
-                        )
-                    else:
-                        QMessageBox.information(dlg, tr["msg_whisper_title"], res)
+                        return
 
-                QTimer.singleShot(200, _check_result)
+                    result_box: list[str | Exception | None] = [None]
+
+                    # Use the target language from the live UI combo if
+                    # available, otherwise fall back to the saved config.
+                    # This ensures the test transcription uses the language
+                    # the user currently has selected, not whatever was last
+                    # persisted to disk.
+                    try:
+                        _cur_lang = (
+                            self._lang_combo.currentText()
+                            if hasattr(self, "_lang_combo")
+                            and self._lang_combo.currentText()
+                            else load_config().get("language", "de")
+                        )
+                    except Exception:
+                        _cur_lang = "de"
+
+                    def _run():
+                        try:
+                            cfg_obj = Config()
+                            cfg_obj.whisper_url = url_edit.text().strip()
+                            raw_port = port_edit.text().strip()
+                            cfg_obj.port = int(raw_port) if raw_port else None
+                            cfg_obj.whisper_endpoint = ep_edit.text().strip()
+                            cfg_obj.whisper_model = model_edit.text().strip()
+                            cfg_obj.whisper_provider = _cur_prov()
+                            cfg_obj.whisper_token = token_edit.text().strip()
+                            cfg_obj.transcription_guidance_enabled = (
+                                guidance_chk.isChecked()
+                            )
+                            cfg_obj.transcription_initial_prompt = (
+                                prompt_edit.toPlainText()
+                            )
+                            cfg_obj.language = _cur_lang
+                            result_box[0] = WhisperClient(cfg_obj).transcribe(tmp.name)
+                        except Exception as exc:
+                            result_box[0] = exc
+                        finally:
+                            try:
+                                os.unlink(tmp.name)
+                            except OSError:
+                                pass
+
+                    threading.Thread(target=_run, daemon=True).start()
+
+                    def _check_result():
+                        if result_box[0] is None:
+                            QTimer.singleShot(200, _check_result)
+                            return
+                        level_dlg.close()
+                        self._testing = False
+                        test_btn.setEnabled(True)
+                        res = result_box[0]
+                        if isinstance(res, Exception):
+                            QMessageBox.critical(
+                                dlg, tr["msg_whisper_fail_title"], str(res)
+                            )
+                        elif not res:
+                            QMessageBox.warning(
+                                dlg, tr["msg_whisper_title"], tr["msg_whisper_no_text"]
+                            )
+                        else:
+                            # Show the language that was sent so the user can
+                            # verify their server actually honoured it.
+                            lang_label = tr.get("target_language", "Zielsprache")
+                            body = f"[{lang_label}: {_cur_lang}]\n\n{res}"
+                            QMessageBox.information(dlg, tr["msg_whisper_title"], body)
+
+                    QTimer.singleShot(200, _check_result)
 
             QTimer.singleShot(50, _poll)
 
@@ -1027,21 +1021,172 @@ class SettingsWindow:
 
         _CLOUD_LLM_PROVIDERS = {"Groq", "Openrouter", "OpenAI", "Anthropic"}
 
+        # model row with refresh button (editable combobox populated from provider)
+        # NOTE: must be created before _on_llm_prov_change, which triggers a refresh.
+        model_combo = QComboBox()
+        model_combo.setEditable(True)
+        model_combo.setInsertPolicy(QComboBox.NoInsert)
+        _initial_model = cfg.get("correction_model", "")
+        if _initial_model:
+            model_combo.addItem(_initial_model)
+            model_combo.setCurrentText(_initial_model)
+        refresh_btn = _btn("↻")
+        refresh_btn.setFixedWidth(36)
+        refresh_btn.setToolTip(tr.get("model_reload", "Modelle neu laden"))
+        model_row = _hbox(model_combo, refresh_btn)
+        llm_form.addRow(tr["model"], model_row)
+
+        # ── model-listing helpers (must be defined before _on_llm_prov_change) ──
+        def _models_url_and_headers(
+            prov: str, base: str, tok: str
+        ) -> tuple[str, dict] | None:
+            """Return the (url, headers) for listing models of *prov*, or None."""
+            if prov == "Ollama":
+                return base.rstrip("/") + "/api/tags", {}
+            if prov in ("LM Studio", "Azure OpenAI"):
+                return base.rstrip("/") + "/v1/models", (
+                    {"Authorization": f"Bearer {tok}"} if tok else {}
+                )
+            if prov == "OpenAI":
+                return "https://api.openai.com/v1/models", (
+                    {"Authorization": f"Bearer {tok}"} if tok else {}
+                )
+            if prov == "Groq":
+                return "https://api.groq.com/openai/v1/models", (
+                    {"Authorization": f"Bearer {tok}"} if tok else {}
+                )
+            if prov == "Openrouter":
+                return "https://openrouter.ai/api/v1/models", (
+                    {"Authorization": f"Bearer {tok}"} if tok else {}
+                )
+            if prov == "Anthropic":
+                return "https://api.anthropic.com/v1/models", {
+                    "x-api-key": tok,
+                    "anthropic-version": "2023-06-01",
+                }
+            return None
+
+        def _parse_models(prov: str, data: dict) -> list[str]:
+            """Extract a list of model names/ids from a provider's JSON response."""
+            try:
+                if prov == "Ollama":
+                    return [m.get("name", "") for m in data.get("models", []) if m.get("name")]
+                # OpenAI-compatible (LM Studio, OpenAI, Groq, OpenRouter, Azure)
+                return [m.get("id", "") for m in data.get("data", []) if m.get("id")]
+            except Exception:
+                return []
+
+        def _populate_model_combo(names: list[str]) -> None:
+            cur = model_combo.currentText().strip()
+            # Build a single sorted list (case-insensitive) including the
+            # currently selected/typed value so it sits at its alphabetical
+            # position rather than always being prepended.
+            all_names = [n for n in names if n]
+            if cur and cur not in all_names:
+                all_names.append(cur)
+            sorted_items = sorted(set(all_names), key=lambda s: s.casefold())
+            model_combo.blockSignals(True)
+            model_combo.clear()
+            model_combo.addItems(sorted_items)
+            # Always make sure the selected model is what the combobox displays
+            # in its line-edit area.
+            if cur:
+                idx = model_combo.findText(cur)
+                if idx >= 0:
+                    model_combo.setCurrentIndex(idx)
+                else:
+                    model_combo.setEditText(cur)
+            elif sorted_items:
+                model_combo.setCurrentIndex(0)
+            model_combo.blockSignals(False)
+
+        def _refresh_models(silent: bool = False) -> None:
+            prov = prov_combo.currentText()
+            tok = token_edit.text().strip()
+            raw_port = port_edit.text().strip()
+            try:
+                port_val = int(raw_port) if raw_port else None
+            except ValueError:
+                port_val = None
+            base = _build_base_url(url_edit.text().strip(), port_val)
+
+            # Cloud providers need a token to even attempt the listing.
+            if prov in _CLOUD_LLM_PROVIDERS and not tok:
+                if not silent:
+                    QMessageBox.warning(
+                        dlg, tr["model"], tr.get("model_need_token", "Bitte Token angeben.")
+                    )
+                return
+
+            target = _models_url_and_headers(prov, base, tok)
+            if target is None:
+                return
+            url, headers = target
+
+            refresh_btn.setEnabled(False)
+            prev_text = model_combo.currentText()
+            # While loading, keep the previously selected model visible in the
+            # line-edit area (don't clear/repopulate the dropdown yet).
+            model_combo.blockSignals(True)
+            model_combo.setEditText(prev_text)
+            model_combo.setEnabled(False)
+            model_combo.blockSignals(False)
+
+            result_box: list = [None]
+
+            def _run():
+                try:
+                    r = requests.get(url, headers=headers, timeout=5)
+                    r.raise_for_status()
+                    result_box[0] = r.json()
+                except Exception as exc:
+                    result_box[0] = exc
+
+            threading.Thread(target=_run, daemon=True).start()
+
+            def _check():
+                if result_box[0] is None:
+                    QTimer.singleShot(200, _check)
+                    return
+                refresh_btn.setEnabled(True)
+                res = result_box[0]
+                if isinstance(res, Exception):
+                    model_combo.blockSignals(True)
+                    model_combo.clear()
+                    if prev_text:
+                        model_combo.addItem(prev_text)
+                    model_combo.setEditText(prev_text)
+                    model_combo.setEnabled(True)
+                    model_combo.blockSignals(False)
+                    if not silent:
+                        QMessageBox.warning(
+                            dlg,
+                            tr["model"],
+                            tr.get("model_load_failed", "Modelle konnten nicht geladen werden")
+                            + f":\n{res}",
+                        )
+                    return
+                names = _parse_models(prov, res)
+                _populate_model_combo(names)
+                model_combo.setEnabled(True)
+                if not silent and not names:
+                    QMessageBox.information(
+                        dlg, tr["model"], tr.get("model_none_found", "Keine Modelle gefunden.")
+                    )
+
+            QTimer.singleShot(200, _check)
+
         def _on_llm_prov_change(prov: str) -> None:
             is_cloud = prov in _CLOUD_LLM_PROVIDERS
             llm_form.setRowVisible(_llm_url_row, not is_cloud)
             tok = get_token("correction", prov)
             token_edit.setText(tok)
+            # Cloud providers (and Azure) need a token before we can list models,
+            # so we auto-trigger the load here.
+            _refresh_models(silent=True)
 
         prov_combo.currentTextChanged.connect(_on_llm_prov_change)
         _on_llm_prov_change(prov_combo.currentText())
-
-        # model row with refresh button
-        model_edit = _edit(cfg.get("correction_model", ""))
-        refresh_btn = _btn("↻")
-        refresh_btn.setFixedWidth(36)
-        model_row = _hbox(model_edit, refresh_btn)
-        llm_form.addRow(tr["model"], model_row)
 
         form_lay.addWidget(llm_box)
 
@@ -1256,51 +1401,8 @@ class SettingsWindow:
         del_btn.clicked.connect(_delete_prompt)
         set_act_btn.clicked.connect(_set_active)
 
-        # ── model refresh ──────────────────────────────────────────────────
-        def _refresh_models():
-            refresh_btn.setEnabled(False)
-            base = _build_base_url(
-                url_edit.text().strip(),
-                int(port_edit.text()) if port_edit.text().strip() else None,
-            )
-            result_box: list = [None]
-
-            def _run():
-                try:
-                    from config import _build_base_url as _bbu
-
-                    r = requests.get(base + "/api/tags", timeout=5)
-                    r.raise_for_status()
-                    data = r.json()
-                    names = [m.get("name", "") for m in data.get("models", [])]
-                    result_box[0] = names
-                except Exception as exc:
-                    result_box[0] = exc
-
-            threading.Thread(target=_run, daemon=True).start()
-
-            def _check():
-                if result_box[0] is None:
-                    QTimer.singleShot(200, _check)
-                    return
-                refresh_btn.setEnabled(True)
-                res = result_box[0]
-                if isinstance(res, list):
-                    cur = model_edit.text()
-                    combo = QComboBox()
-                    combo.addItems(res)
-                    if cur in res:
-                        combo.setCurrentText(cur)
-                    combo.currentTextChanged.connect(model_edit.setText)
-                    QMessageBox.information(
-                        dlg, tr["model"], "\n".join(res[:20]) if res else "(none)"
-                    )
-                else:
-                    QMessageBox.warning(dlg, tr["model"], str(res))
-
-            QTimer.singleShot(200, _check)
-
-        refresh_btn.clicked.connect(_refresh_models)
+        # ── model refresh (function defined earlier; just wire the button) ─
+        refresh_btn.clicked.connect(lambda: _refresh_models(silent=False))
 
         # ── param reset ────────────────────────────────────────────────────
         def _reset_params():
@@ -1399,7 +1501,7 @@ class SettingsWindow:
             c["correction_url"] = url_edit.text().strip()
             raw_port = port_edit.text().strip()
             c["correction_port"] = int(raw_port) if raw_port else None
-            c["correction_model"] = model_edit.text().strip()
+            c["correction_model"] = model_combo.currentText().strip()
             tok = token_edit.text().strip()
             if tok:
                 set_token("correction", prov_combo.currentText(), tok)
@@ -1436,7 +1538,7 @@ class SettingsWindow:
         def _test_llm() -> None:
             if self._testing:
                 return
-            model = model_edit.text().strip()
+            model = model_combo.currentText().strip()
             is_cloud = prov_combo.currentText() in _CLOUD_LLM_PROVIDERS
             url = url_edit.text().strip()
             if not model or (not is_cloud and not url):

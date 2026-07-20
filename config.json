@@ -1,10 +1,10 @@
 {
   "whisper_url": "http://10.4.190.16",
-  "port": 8009,
+  "port": 8008,
   "whisper_token": "",
   "whisper_model": "whisper-large-v3-turbo",
   "whisper_provider": "local",
-  "transcription_guidance_enabled": false,
+  "transcription_guidance_enabled": true,
   "whisper_endpoint": "transcribe",
   "health_endpoint": "health",
   "language": "de",
