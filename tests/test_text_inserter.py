@@ -1,9 +1,8 @@
 """Tests for text_inserter.py — clipboard helpers and TextInserter."""
 
 import ctypes
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tests.conftest import make_stub_config
 from text_inserter import (
