@@ -12,7 +12,7 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 
 # ── SSL must be patched before any HTTP import is used ────────────────────────
 import ssl_setup  # noqa: E402  (intentionally first)
-from config import Config, auto_elevate_if_needed, load_config, save_config
+from config import Config, load_config, save_config
 from llm_corrector import LLMCorrector
 from recorder import Recorder
 from text_inserter import TextInserter
@@ -36,9 +36,6 @@ class RunContext:
 
 class App:
     def __init__(self):
-        raw_cfg = load_config()
-        auto_elevate_if_needed(raw_cfg)
-
         self.config = Config()
         self.dock = DockWindow(
             self.config.raw,
@@ -482,7 +479,8 @@ if __name__ == "__main__":
     _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
     _mutex = _k32.CreateMutexW(None, True, "FlüsterFee_SingleInstance")
     if ctypes.get_last_error() == 183:  # ERROR_ALREADY_EXISTS
-        QMessageBox.warning(None, "FlüsterFee", "FlüsterFee läuft bereits.")
+        ui_lang = load_config().get("ui_language", "de")
+        QMessageBox.warning(None, "FlüsterFee", t("msg_already_running", ui_lang))
         sys.exit(0)
 
     print("Starte FlüsterFee…")

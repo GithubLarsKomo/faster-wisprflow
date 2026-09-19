@@ -2,6 +2,7 @@ import pystray
 from PIL import Image, ImageDraw
 
 from config import _resource
+from ui.translations import t
 
 
 class Tray:
@@ -22,9 +23,10 @@ class Tray:
         return image
 
     def run(self):
+        lang = getattr(self.app.config, "ui_language", "de")
         menu = pystray.Menu(
-            pystray.MenuItem("Settings", lambda: self.app.open_settings()),
-            pystray.MenuItem("Quit", lambda: self.app.quit()),
+            pystray.MenuItem(t("tray_settings", lang), lambda *_: self.app.open_settings()),
+            pystray.MenuItem(t("tray_quit", lang), lambda *_: self.app.quit()),
         )
         self.icon = pystray.Icon("FlüsterFee", self.make_image(), "FlüsterFee", menu)
         self.icon.run()

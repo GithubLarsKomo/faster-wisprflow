@@ -5,6 +5,9 @@ LANG_CODES = ["de", "en", "fr", "es", "zh", "pt", "pl", "it"]
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "de": {
         "title": "FlüsterFee Einstellungen",
+        "tray_settings": "Einstellungen",
+        "tray_quit": "Beenden",
+        "msg_already_running": "FlüsterFee läuft bereits.",
         "gen_frame": " Allgemein ",
         "hotkey": "Hotkey",
         "hotkey_hint": "  z. B. ctrl+linke windows",
@@ -112,6 +115,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "en": {
         "title": "FlüsterFee Settings",
+        "tray_settings": "Settings",
+        "tray_quit": "Quit",
+        "msg_already_running": "FlüsterFee is already running.",
         "gen_frame": " General ",
         "hotkey": "Hotkey",
         "hotkey_hint": "  e.g. ctrl+left windows",
@@ -219,6 +225,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "fr": {
         "title": "FlüsterFee Paramètres",
+        "tray_settings": "Paramètres",
+        "tray_quit": "Quitter",
+        "msg_already_running": "FlüsterFee est déjà en cours d’exécution.",
         "gen_frame": " Général ",
         "hotkey": "Raccourci",
         "hotkey_hint": "  ex. ctrl+touche windows gauche",
@@ -326,6 +335,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "es": {
         "title": "FlüsterFee Configuración",
+        "tray_settings": "Configuración",
+        "tray_quit": "Salir",
+        "msg_already_running": "FlüsterFee ya se está ejecutando.",
         "gen_frame": " General ",
         "hotkey": "Atajo",
         "hotkey_hint": "  p. ej. ctrl+windows izquierda",
@@ -433,6 +445,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "zh": {
         "title": "FlüsterFee 设置",
+        "tray_settings": "设置",
+        "tray_quit": "退出",
+        "msg_already_running": "FlüsterFee 已在运行。",
         "gen_frame": " 常规 ",
         "hotkey": "快捷键",
         "hotkey_hint": "  例如 ctrl+左 windows",
@@ -540,6 +555,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "pt": {
         "title": "FlüsterFee Configurações",
+        "tray_settings": "Configurações",
+        "tray_quit": "Sair",
+        "msg_already_running": "FlüsterFee já está em execução.",
         "gen_frame": " Geral ",
         "hotkey": "Atalho",
         "hotkey_hint": "  ex. ctrl+windows esquerda",
@@ -647,6 +665,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "pl": {
         "title": "FlüsterFee Ustawienia",
+        "tray_settings": "Ustawienia",
+        "tray_quit": "Zakończ",
+        "msg_already_running": "FlüsterFee jest już uruchomiona.",
         "gen_frame": " Ogólne ",
         "hotkey": "Skrót",
         "hotkey_hint": "  np. ctrl+lewy windows",
@@ -754,6 +775,9 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "it": {
         "title": "FlüsterFee Impostazioni",
+        "tray_settings": "Impostazioni",
+        "tray_quit": "Esci",
+        "msg_already_running": "FlüsterFee è già in esecuzione.",
         "gen_frame": " Generale ",
         "hotkey": "Scorciatoia",
         "hotkey_hint": "  es. ctrl+tasto windows sinistro",

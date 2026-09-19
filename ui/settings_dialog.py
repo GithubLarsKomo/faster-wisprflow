@@ -204,10 +204,6 @@ class SettingsWindow:
         self._restore_chk.setChecked(cfg["restore_clipboard"])
         gen_form.addRow("", self._restore_chk)
 
-        self._elevate_chk = QCheckBox(tr["auto_elevate"])
-        self._elevate_chk.setChecked(cfg.get("auto_elevate", False))
-        gen_form.addRow("", self._elevate_chk)
-
         self._ui_lang_combo = QComboBox()
         self._ui_lang_combo.addItems(LANG_CODES)
         cur_ui_lang = cfg.get("ui_language", "de")
@@ -367,7 +363,6 @@ class SettingsWindow:
         hotkey_raw = self._hotkey_edit.text().strip()
         cfg["hotkey_keys"] = [k.strip() for k in hotkey_raw.split("+") if k.strip()]
         cfg["restore_clipboard"] = self._restore_chk.isChecked()
-        cfg["auto_elevate"] = self._elevate_chk.isChecked()
         cfg["ui_language"] = self._ui_lang_combo.currentText()
         cfg["proxy"] = self._proxy_edit.text().strip()
         cfg["language"] = self._lang_combo.currentText()
