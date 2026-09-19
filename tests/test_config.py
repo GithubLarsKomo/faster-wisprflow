@@ -1,7 +1,7 @@
 """Tests for config.py — _build_base_url, load_config, save_config, Config."""
 
 import json
-
+from pathlib import Path
 
 from config import (
     DEFAULT_CONFIG,
@@ -129,3 +129,23 @@ def test_auto_elevate_is_noop():
     auto_elevate_if_needed({"auto_elevate": True})
     auto_elevate_if_needed({"auto_elevate": False})
     auto_elevate_if_needed({})
+
+
+# ---------------------------------------------------------------------------
+# repository config contract
+# ---------------------------------------------------------------------------
+
+
+def test_example_config_matches_defaults():
+    example_path = Path(__file__).resolve().parents[1] / "config.example.json"
+    example = json.loads(example_path.read_text(encoding="utf-8"))
+    assert example == DEFAULT_CONFIG
+
+
+def test_defaults_are_portable_and_do_not_advertise_noop_options():
+    assert DEFAULT_CONFIG["whisper_url"] == "http://127.0.0.1"
+    assert DEFAULT_CONFIG["correction_url"] == "http://127.0.0.1"
+    assert "auto_elevate" not in DEFAULT_CONFIG
+    assert "start_with_windows" not in DEFAULT_CONFIG
+    assert "whisper_token" not in DEFAULT_CONFIG
+    assert "correction_token" not in DEFAULT_CONFIG

@@ -4,6 +4,13 @@ Branch: `fix/run-isolation-provider-hardening`
 Specification: [SPEC.md](SPEC.md)  
 Date: 2026-09-19
 
+## Implementation status
+
+- Phases 0–8 are implemented on `fix/run-isolation-provider-hardening`.
+- Windows CI is the authoritative automated merge gate for Ruff, pytest and the PyInstaller smoke build.
+- Phase 9 (settings-dialog modularization) remains intentionally deferred; it is not required for this hardening merge.
+- A final manual Windows smoke matrix on real desktop applications remains required before merge.
+
 ## Delivery strategy
 
 Work in small verifiable increments. Do not mix broad UI refactoring into the correctness fixes.

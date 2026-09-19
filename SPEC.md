@@ -1,6 +1,6 @@
 # FlüsterFee Hardening Specification
 
-Status: proposed  
+Status: implemented on hardening branch; pending final merge gate  
 Branch: `fix/run-isolation-provider-hardening`  
 Repository: `GithubLarsKomo/faster-wisprflow`  
 Target branch: `master`  
