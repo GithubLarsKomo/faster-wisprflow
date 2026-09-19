@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 from app import App
 from tests.conftest import make_stub_config
