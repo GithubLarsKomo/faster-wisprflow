@@ -1,10 +1,7 @@
 """Tests for config.py — _build_base_url, load_config, save_config, Config."""
 
 import json
-from pathlib import Path
-from unittest.mock import patch
 
-import pytest
 
 from config import (
     DEFAULT_CONFIG,
