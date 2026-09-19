@@ -1,15 +1,14 @@
 import requests
 
 from config import Config, _build_base_url
+from provider_registry import get_provider, normalize_provider
 
 
 class LLMCorrector:
     """Sends transcribed text to a LLM via the OpenAI-compatible chat completions endpoint.
 
-    Supported backends (auto-detected from ``correction_url``):
-    - Ollama      (default): ``<correction_url>:<correction_port>/v1/chat/completions``
-    - OpenRouter  (URL contains "openrouter.ai"): ``https://openrouter.ai/api/v1/chat/completions``
-    - Groq        (URL contains "groq.com"): ``https://api.groq.com/v1/chat/completions``
+    Provider routing comes from ``provider_registry.py``. Local/OpenAI-compatible
+    servers use ``<correction_url>:<correction_port>/v1/chat/completions``.
 
     The system prompt is sent as the ``system`` role; the raw text as the ``user`` role.
     """
@@ -18,20 +17,17 @@ class LLMCorrector:
         self.config = config
 
     def _chat_url(self) -> str:
-        provider = getattr(self.config, "llm_provider", "Ollama")
-        if provider == "Openrouter":
-            return "https://openrouter.ai/api/v1/chat/completions"
-        if provider == "Groq":
-            return "https://api.groq.com/v1/chat/completions"
-        if provider == "OpenAI":
-            return "https://api.openai.com/v1/chat/completions"
-        if provider == "Anthropic":
-            return "https://api.anthropic.com/v1/messages"
+        provider = get_provider(getattr(self.config, "llm_provider", "Ollama"))
+        if provider is not None and provider.chat_url:
+            return provider.chat_url
         base = _build_base_url(self.config.correction_url, self.config.correction_port)
         return base.rstrip("/") + "/v1/chat/completions"
 
     def _is_anthropic(self) -> bool:
-        return getattr(self.config, "llm_provider", "Ollama") == "Anthropic"
+        return (
+            normalize_provider(getattr(self.config, "llm_provider", "Ollama"))
+            == "anthropic"
+        )
 
     def _build_anthropic_request(self, text: str) -> tuple[dict, dict]:
         """Return (headers, payload) for an Anthropic Messages API request."""
@@ -93,8 +89,10 @@ class LLMCorrector:
         # Disable reasoning tokens on providers that support the field.
         # Reasoning models return content=None when reasoning consumes the whole
         # response — turning it off ensures a plain-text reply is always returned.
-        provider = getattr(self.config, "llm_provider", "Ollama")
-        if provider == "Openrouter":
+        provider_id = normalize_provider(
+            getattr(self.config, "llm_provider", "Ollama")
+        )
+        if provider_id == "openrouter":
             payload["reasoning"] = {"effort": "none"}
         return headers, payload
 
