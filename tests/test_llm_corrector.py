@@ -221,3 +221,89 @@ class TestProbe:
         with patch("llm_corrector.requests.post", return_value=mock_resp):
             with pytest.raises(ValueError):
                 llm.probe("test")
+
+
+# ---------------------------------------------------------------------------
+# non-loss / truncation guards
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectionIntegrity:
+    def test_output_budget_grows_for_long_dictation_but_respects_context(self):
+        llm = LLMCorrector(
+            make_stub_config(max_tokens=220, num_ctx=1024)
+        )
+        long_text = "wort " * 300
+        budget = llm._max_output_tokens(long_text)
+
+        assert budget > 220
+        assert budget <= 512
+
+    def test_finish_reason_length_falls_back_to_complete_raw_text(self):
+        llm = LLMCorrector(make_stub_config())
+        raw = "dies ist der vollständige rohe text der nicht verloren gehen darf"
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": "dies ist der"},
+                }
+            ]
+        }
+
+        with patch("llm_corrector.requests.post", return_value=mock_resp):
+            assert llm.correct(raw) == raw
+
+    def test_suspiciously_short_correction_falls_back_to_raw_text(self):
+        llm = LLMCorrector(make_stub_config())
+        raw = "eins zwei drei vier fünf sechs sieben acht neun zehn elf zwölf"
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "stop",
+                    "message": {"content": "eins zwei drei"},
+                }
+            ]
+        }
+
+        with patch("llm_corrector.requests.post", return_value=mock_resp):
+            assert llm.correct(raw) == raw
+
+    def test_anthropic_max_tokens_falls_back_to_raw_text(self):
+        llm = LLMCorrector(
+            make_stub_config(
+                llm_provider="Anthropic",
+                correction_token="secret",
+            )
+        )
+        raw = "vollständiger diktierter text"
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "stop_reason": "max_tokens",
+            "content": [{"type": "text", "text": "vollständiger"}],
+        }
+
+        with patch("llm_corrector.requests.post", return_value=mock_resp):
+            assert llm.correct(raw) == raw
+
+    def test_probe_reports_truncation_explicitly(self):
+        llm = LLMCorrector(make_stub_config())
+        mock_resp = MagicMock()
+        mock_resp.ok = True
+        mock_resp.json.return_value = {
+            "choices": [
+                {
+                    "finish_reason": "length",
+                    "message": {"content": "partial"},
+                }
+            ]
+        }
+
+        with patch("llm_corrector.requests.post", return_value=mock_resp):
+            with pytest.raises(ValueError, match="truncated"):
+                llm.probe("test text")
