@@ -4,6 +4,8 @@ import queue
 import sys
 import threading
 import time
+from dataclasses import dataclass, field
+from pathlib import Path
 
 from PySide6.QtCore import QTimer, QtMsgType, qInstallMessageHandler
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -20,6 +22,16 @@ from ui.settings_dialog import SettingsWindow
 from ui.translations import t
 from vocabulary import VocabularyManager
 from whisper_client import WhisperClient
+
+
+@dataclass
+class RunContext:
+    """Identity and cancellation state for one dictation run."""
+
+    id: int
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    started_at: float = field(default_factory=time.monotonic)
+    audio_path: Path | None = None
 
 
 class App:
@@ -48,6 +60,14 @@ class App:
         self.is_busy = False
         self.event_queue = queue.Queue()
         self.running = True
+
+        # A dictation run remains identifiable even while a cancelled worker is
+        # still returning from a blocking HTTP request.  Shared flags are kept
+        # for UI compatibility, but they are never the authority for deciding
+        # whether a worker may produce side effects.
+        self._run_lock = threading.Lock()
+        self._run_counter = 0
+        self._active_run: RunContext | None = None
 
         # Initialise dock badges from config
         self.dock.set_llm_enabled(self.config.correction_enabled)
@@ -78,6 +98,44 @@ class App:
             self.settings.sync_from_config()
 
         QTimer.singleShot(0, _update_dock)
+
+    def _begin_run(self) -> RunContext:
+        """Create and activate a new run, invalidating any stale predecessor."""
+        with self._run_lock:
+            if self._active_run is not None:
+                self._active_run.cancel_event.set()
+            self._run_counter += 1
+            run = RunContext(id=self._run_counter)
+            self._active_run = run
+            return run
+
+    def _get_active_run(self) -> RunContext | None:
+        with self._run_lock:
+            return self._active_run
+
+    def _is_current_run(self, run: RunContext) -> bool:
+        """Return True only while *run* owns the right to create side effects."""
+        with self._run_lock:
+            return self._active_run is run and not run.cancel_event.is_set()
+
+    def _cancel_active_run(self) -> RunContext | None:
+        """Invalidate the current run without waiting for blocked worker I/O."""
+        with self._run_lock:
+            run = self._active_run
+            if run is not None:
+                run.cancel_event.set()
+                self._active_run = None
+            self.is_busy = False
+            return run
+
+    def _finish_run_if_current(self, run: RunContext) -> bool:
+        """Clear run/busy state only if *run* is still the active owner."""
+        with self._run_lock:
+            if self._active_run is not run:
+                return False
+            self._active_run = None
+            self.is_busy = False
+            return True
 
     def hotkey_pressed(self):
         """Check if the configured hotkey combination is pressed.
@@ -157,14 +215,14 @@ class App:
             pass
 
     def cancel_current_run(self) -> None:
-        """Abort the in-flight recording/processing run and reset the dock.
+        """Invalidate the active run and reset the dock immediately.
 
-        Called when the user clicks the ✕ button while the dock is in
-        RECORDING or PROCESSING state. This guarantees the user is never
-        stuck — even if the underlying HTTP request to the LLM or Whisper
-        backend is hanging, the dock returns to IDLE immediately and any
-        subsequent API response is ignored.
+        Blocking HTTP calls are allowed to return naturally in their daemon
+        workers.  Their RunContext stays cancelled, so stale responses cannot
+        insert text or mutate the state of a newer run.
         """
+        self._cancel_active_run()
+
         # If we're still recording, stop the sounddevice stream first.
         if self.is_recording:
             self.is_recording = False
@@ -176,27 +234,27 @@ class App:
                     self.recorder.stream = None
             except Exception:
                 pass
-        # Flip the busy flag so any in-flight worker exits its critical
-        # sections promptly (and so a new hotkey press is accepted).
-        self.is_busy = False
-        # Reset the dock immediately on the main thread.
+
+        # Reset the dock immediately on the main thread. Any stale worker will
+        # fail _is_current_run() before emitting a later state transition.
         self.dock.set_idle()
 
     def start_recording(self):
-        if self.is_recording or self.is_busy:
+        if self.is_recording or self.is_busy or self._get_active_run() is not None:
             return
 
+        run = self._begin_run()
         try:
             self.is_recording = True
             self.recorder.start()
 
             def _start_popup():
-                if not self.is_recording:
+                if not self.is_recording or not self._is_current_run(run):
                     return
                 self.dock.set_recording(on_timeout=self.stop_recording)
 
                 def _poll_rms():
-                    if self.is_recording:
+                    if self.is_recording and self._is_current_run(run):
                         self.dock.set_rms(self.recorder.last_rms)
                         QTimer.singleShot(50, _poll_rms)
 
@@ -205,6 +263,8 @@ class App:
             QTimer.singleShot(100, _start_popup)
         except Exception:
             self.is_recording = False
+            run.cancel_event.set()
+            self._finish_run_if_current(run)
             try:
                 self.recorder.recording = False
             except Exception:
@@ -212,7 +272,8 @@ class App:
             self.dock.set_idle()
 
     def stop_recording(self):
-        if not self.is_recording:
+        run = self._get_active_run()
+        if not self.is_recording or run is None or not self._is_current_run(run):
             return
 
         self.is_recording = False
@@ -221,63 +282,63 @@ class App:
         self.dock.set_rms(0.0)
         self.dock.set_processing()
 
-        threading.Thread(target=self._safe_transcribe_and_insert, daemon=True).start()
+        threading.Thread(
+            target=self._safe_transcribe_and_insert,
+            args=(run,),
+            daemon=True,
+        ).start()
 
-    def _safe_transcribe_and_insert(self) -> None:
-        """Run transcribe_and_insert but guarantee the dock returns to idle
-        and the busy flag is cleared even on any unexpected exception."""
+    def _safe_transcribe_and_insert(self, run: RunContext) -> None:
+        """Run one worker while preventing stale runs from touching newer state."""
         try:
-            self.transcribe_and_insert()
+            self.transcribe_and_insert(run)
         except BaseException as exc:
-            # Last-resort guard: log and ensure the dock is reset so the
-            # user is never stuck in RECORDING/PROCESSING state.
+            # Last-resort guard. A stale/cancelled worker is deliberately
+            # silent; only the current owner may report an error or clear state.
+            if not self._is_current_run(run):
+                return
             try:
                 lang = self.config.ui_language
                 err_msg = f'{t("msg_error", lang)}: {exc}'
                 self.dock.show_error_signal.emit(err_msg)
             except Exception:
                 QTimer.singleShot(0, self.dock.set_idle)
-            self.is_busy = False
+            self._finish_run_if_current(run)
 
-    def transcribe_and_insert(self):
+    def transcribe_and_insert(self, run: RunContext) -> None:
         audio_path = None
-        # Track whether a dock-state transition was scheduled. If not (e.g. an
-        # exception path that didn't emit a signal), force the dock to IDLE in
-        # the finally block so the recording indicator is never left stuck.
         dock_resolved = False
         cancelled = False
         try:
+            if not self._is_current_run(run):
+                cancelled = True
+                return
+
             audio_path = self.recorder.stop()
+            run.audio_path = audio_path
+
+            if not self._is_current_run(run):
+                cancelled = True
+                return
+
             text = self.client.transcribe(audio_path)
 
-            # If the user clicked ✕ during the API call, the dock has already
-            # been reset to IDLE by cancel_current_run(). Skip all downstream
-            # work and don't try to insert text.
-            if not self.is_busy:
+            # A blocked request may have returned long after cancellation or
+            # after a newer run became active. Revalidate before every side
+            # effect rather than relying on the shared is_busy flag.
+            if not self._is_current_run(run):
                 cancelled = True
                 return
 
             if text:
                 raw_text = self.vocab.apply(text)
-                if not self.is_busy:
+                if not self._is_current_run(run):
                     cancelled = True
                     return
-                # Tell the user the LLM step is in progress so the dock
-                # indicator doesn't look frozen during a slow correction.
+
                 if self.config.correction_enabled:
                     self.dock.mark_correcting()
 
-                # LLM correction is best-effort. If it fails for any reason
-                # (timeout, HTTP error, model refused, reasoning-only model,
-                # user cancelled, …) we still insert the raw, vocab-applied
-                # transcript so the user is never left without their text.
-                #
-                # Also important: a slow LLM (e.g. local Ollama on CPU) can
-                # take 30+ s, during which the user might keep typing or
-                # copying in the foreground app. We poll is_busy *during*
-                # the wait so a cancel aborts the loop promptly, AND we
-                # check it again *after* correct() returns so a paste from
-                # a long-cancelled run is never sent.
                 corrected_text: str | None = None
                 llm_failed: Exception | None = None
                 if self.config.correction_enabled:
@@ -286,51 +347,43 @@ class App:
                     except Exception as exc:  # noqa: BLE001
                         llm_failed = exc
 
-                # Re-check after the (potentially long) LLM call.
-                if not self.is_busy:
+                if not self._is_current_run(run):
                     cancelled = True
                     return
 
                 final_text = (
                     corrected_text if (corrected_text and not llm_failed) else raw_text
                 )
-                # Switch the dock to DONE *before* the slow insert_text call
-                # so the user sees the green ✓ (transcription succeeded,
-                # text is being pasted) instead of the purple ●●● "correcting"
-                # dots for the full ~400 ms the paste takes. Also guarantees
-                # the dock resolves even if insert_text raises.
-                #
-                # All dock-state transitions from the worker thread are
-                # routed through the dock's signals (which are Qt signals
-                # and therefore thread-safe) instead of QTimer.singleShot
-                # to guarantee the main thread picks them up reliably — even
-                # if the worker thread is in a weird state at the moment
-                # the event would fire.
+
+                # Revalidate immediately before the two user-visible side
+                # effects. Once the paste has begun it cannot be retracted, but
+                # a cancelled/stale worker can never begin a new paste.
+                if not self._is_current_run(run):
+                    cancelled = True
+                    return
                 self.dock.mark_done()
+
+                if not self._is_current_run(run):
+                    cancelled = True
+                    return
                 try:
                     self.inserter.insert_text(final_text)
                 except Exception:
-                    # insert_text already handles its own clipboard errors
-                    # internally; this is a true last-resort catch so the
-                    # dock's set_done → set_idle chain still fires.
                     pass
-                # Force a short IDLE transition regardless of any pending
-                # singleShot from set_done. The default DONE_HOLD_MS is
-                # too long — the user sees the green ✓ for over a second
-                # after the paste already completed, which they perceive
-                # as "the indicator is still running".
-                self.dock.schedule_idle(600)
-                dock_resolved = True
-                # If the LLM failed, briefly notify the user that we fell
-                # back to the raw transcript. This is a non-blocking info
-                # toast, not a hard error — the text is already inserted.
-                if llm_failed is not None:
-                    lang = self.config.ui_language
-                    self.dock.show_info_signal.emit(
-                        t("msg_result_title", lang),
-                        t("msg_llm_fallback", lang),
-                    )
+
+                if self._is_current_run(run):
+                    self.dock.schedule_idle(600)
+                    dock_resolved = True
+                    if llm_failed is not None:
+                        lang = self.config.ui_language
+                        self.dock.show_info_signal.emit(
+                            t("msg_result_title", lang),
+                            t("msg_llm_fallback", lang),
+                        )
             else:
+                if not self._is_current_run(run):
+                    cancelled = True
+                    return
                 lang = self.config.ui_language
                 self.dock.show_info_signal.emit(
                     t("msg_result_title", lang),
@@ -340,6 +393,9 @@ class App:
                 dock_resolved = True
 
         except Exception as e:
+            if not self._is_current_run(run):
+                cancelled = True
+                return
             if str(e) == "no_audio":
                 self.dock.mark_idle()
                 dock_resolved = True
@@ -347,7 +403,6 @@ class App:
                 lang = self.config.ui_language
                 err_msg = f'{t("msg_error", lang)}: {e}'
                 self.dock.show_error_signal.emit(err_msg)
-                # show_error queues its own set_idle after T.ERROR_HOLD_MS.
                 dock_resolved = True
 
         finally:
@@ -356,12 +411,11 @@ class App:
                     audio_path.unlink()
                 except Exception:
                     pass
-            self.is_busy = False
-            # Safety net: if an exception escaped even the inner handlers
-            # (e.g. an error in the dock signal emit), make absolutely sure
-            # the dock returns to IDLE so the user is never stuck in
-            # RECORDING or PROCESSING.
-            if not dock_resolved and not cancelled:
+
+            # A stale worker must never clear a newer run's busy state. Only
+            # the active owner can complete the shared lifecycle.
+            finished_current = self._finish_run_if_current(run)
+            if finished_current and not dock_resolved and not cancelled:
                 self.dock.mark_idle()
 
     def open_settings(self):
