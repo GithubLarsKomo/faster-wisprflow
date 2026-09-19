@@ -1,3 +1,4 @@
+import os
 import tempfile
 import threading
 from pathlib import Path
@@ -50,12 +51,31 @@ class Recorder:
             self.stream.close()
             self.stream = None
 
-        audio_path = Path(tempfile.gettempdir()) / self.config.audio_filename
-
         with self.lock:
             if not self.frames:
                 raise RuntimeError("no_audio")
             audio = np.concatenate(self.frames, axis=0)
 
-        sf.write(str(audio_path), audio, self.config.sample_rate)
+        # Every dictation run owns a distinct temporary artifact. A cancelled
+        # worker may outlive a newer run while blocked in HTTP I/O, so sharing
+        # one fixed recording.wav path would allow stale cleanup or reads to
+        # interfere with the newer run.
+        configured_suffix = Path(self.config.audio_filename).suffix
+        suffix = configured_suffix if configured_suffix else ".wav"
+        fd, tmp_name = tempfile.mkstemp(
+            prefix="fluesterfee-",
+            suffix=suffix,
+            dir=tempfile.gettempdir(),
+        )
+        os.close(fd)
+        audio_path = Path(tmp_name)
+
+        try:
+            sf.write(str(audio_path), audio, self.config.sample_rate)
+        except Exception:
+            try:
+                audio_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+            raise
         return audio_path
