@@ -43,13 +43,13 @@ class TestTranscribeRouting:
     def test_routes_to_groq(self):
         wc = WhisperClient(make_stub_config(whisper_provider="Groq"))
         with patch.object(wc, "_transcribe_groq", return_value="text") as m:
-            result = wc.transcribe(Path("audio.wav"))
+            wc.transcribe(Path("audio.wav"))
         m.assert_called_once()
 
     def test_routes_to_custom_for_local(self):
         wc = WhisperClient(make_stub_config(whisper_provider="local"))
         with patch.object(wc, "_transcribe_custom", return_value="text") as m:
-            result = wc.transcribe(Path("audio.wav"))
+            wc.transcribe(Path("audio.wav"))
         m.assert_called_once()
 
     def test_routes_to_custom_for_unknown_provider(self):
