@@ -12,8 +12,8 @@ import pytest
 sys.modules.setdefault("sounddevice", MagicMock())
 sys.modules.setdefault("soundfile", MagicMock())
 
-from recorder import Recorder
-from tests.conftest import make_stub_config
+from recorder import Recorder  # noqa: E402
+from tests.conftest import make_stub_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
