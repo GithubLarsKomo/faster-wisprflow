@@ -12,11 +12,11 @@ import requests
 import sounddevice as sd
 import soundfile as sf
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QFormLayout, QFrame, QGridLayout, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QMessageBox, QProgressBar, QPushButton,
-                               QScrollArea, QSizePolicy, QSplitter, QStyle,
+                               QScrollArea, QSplitter, QStyle,
                                QTableWidget, QTableWidgetItem, QTextEdit,
                                QVBoxLayout, QWidget)
 
@@ -24,9 +24,9 @@ from config import (_DEFAULT_SYSTEM_PROMPT,
                     _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT, DEFAULT_CONFIG,
                     DEFAULT_CORRECTOR_PROMPT_FILE, Config, _build_base_url,
                     delete_corrector_prompt, get_token, list_corrector_prompts,
-                    load_config, load_corrector_prompt, load_system_prompt,
+                    load_config, load_corrector_prompt,
                     load_transcription_initial_prompt, save_config,
-                    save_corrector_prompt, save_system_prompt,
+                    save_corrector_prompt,
                     save_transcription_initial_prompt, set_token)
 from llm_corrector import LLMCorrector
 from provider_registry import (
