@@ -7,13 +7,10 @@ import time
 from enum import Enum, auto
 
 from PySide6.QtCore import (
-    Property,
     QEasingCurve,
-    QEvent,
     QPoint,
     QPropertyAnimation,
     QRect,
-    QSize,
     Qt,
     QTimer,
     Signal,
@@ -231,7 +228,6 @@ class DockWindow(QWidget):
         on_config_saved=None,
         on_llm_toggled=None,
     ) -> None:
-        app = QApplication.instance()
         super().__init__(
             None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
