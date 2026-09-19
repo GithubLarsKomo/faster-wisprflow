@@ -1180,7 +1180,7 @@ class SettingsWindow:
         form_lay.addWidget(llm_box)
 
         # ── Model parameters ───────────────────────────────────────────────
-        params_box = QGroupBox(" Model Parameters ")
+        params_box = QGroupBox(tr["model_parameters_frame"])
         params_grid = QGridLayout(params_box)
         params_grid.setSpacing(6)
         params_grid.setColumnMinimumWidth(1, 80)

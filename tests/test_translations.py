@@ -75,6 +75,7 @@ _REQUIRED_KEYS = [
     "tray_settings",
     "tray_quit",
     "msg_already_running",
+    "model_parameters_frame",
 ]
 
 
