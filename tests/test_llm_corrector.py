@@ -31,7 +31,7 @@ class TestChatUrl:
     def test_groq(self):
         cfg = make_stub_config(llm_provider="Groq")
         llm = LLMCorrector(cfg)
-        assert llm._chat_url() == "https://api.groq.com/v1/chat/completions"
+        assert llm._chat_url() == "https://api.groq.com/openai/v1/chat/completions"
 
     def test_ollama_no_port(self):
         cfg = make_stub_config(
