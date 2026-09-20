@@ -71,23 +71,40 @@ Apply temperature scaling or another explicit calibration method if required.
 
 Required:
 
-1. PyTorch GPU reference;
-2. ONNX Runtime CPU reference;
-3. INT8 CPU candidate if quality/calibration remain acceptable.
+1. PyTorch reference for training/export and benchmarking only;
+2. ONNX Runtime CPU production target;
+3. INT8 CPU candidate if quality/calibration remain acceptable;
+4. optional OpenVINO benchmark on the target CPU;
+5. production image/process must run without importing `torch`.
 
-The preferred production target is CPU/INT8 or another compact CPU path because the shared RTX A4000 is already used by larger workloads.
+The preferred production target is CPU/INT8 or another compact torch-free CPU path because the shared RTX A4000 is already used by larger workloads.
 
-GPU is an optional acceleration path only.
+GPU is an optional acceleration path only and must not require another PyTorch/CUDA process.
 
 ## Memory policy
 
 Targets are provisional until measured:
 
 - preferred permanent GPU allocation: **0 MB**;
+- preferred additional PyTorch processes: **0**;
 - avoid keeping the SmartRouter resident on CUDA by default;
 - if GPU mode is used, measure actual resident and peak VRAM;
 - FlüsterFee correctness must never depend on GPU availability;
 - expose backend/device/dtype and process memory through `/health`.
+
+## Runtime architecture
+
+Preferred deployment is a shared lightweight service:
+
+```text
+smart-decision-runtime
+  ├─ ONNX SmartRouter session
+  └─ optional ONNX BGE session
+```
+
+The transcript/state should be tokenized/encoded once where the exported graph allows it, and all FlüsterFee decision heads should be returned in one request. Avoid one HTTP request or one encoder pass per question.
+
+The runtime must support explicit per-request deadlines. If the result is late, FlüsterFee discards it and applies the configured deterministic/conservative fallback.
 
 ## Serving contract
 
@@ -117,6 +134,8 @@ A checkpoint is eligible for FlüsterFee only if:
 - calibration supports meaningful thresholds;
 - CPU mode is operational;
 - P95 warm latency is small compared with ASR finalization;
+- one-pass multi-head output is benchmarked against separate calls;
+- production inference works without PyTorch;
 - memory use is measured and documented;
 - failure/unavailability returns a clean fallback instead of blocking dictation.
 
