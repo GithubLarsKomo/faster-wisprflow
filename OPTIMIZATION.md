@@ -190,13 +190,13 @@ After the ASR baseline is measured, implement three user-facing profiles:
 
 Preferred decision pipeline:
 
-`ASR → vocabulary/local rules → deterministic gate → optional Jev decision gate → conditional corrector → insert`
+`ASR → vocabulary/local rules → deterministic gate → optional decision model (Laya/Jev) → conditional corrector → insert`
 
 Rules:
 
 - trivial/short/obviously clean text bypasses all model-based routing;
-- ambiguous runs may be sent to a structured decision model such as TypeSafe Jev;
-- Jev is a router/judge only, never the prose corrector;
+- ambiguous runs may be sent to a structured decision model such as local Laya or cloud TypeSafe Jev;
+- the decision model is a router/judge only, never the prose corrector;
 - only a generative correction model may rewrite arbitrary text;
 - a Jev decision can route to raw insert, local cleanup, lightweight corrector, full corrector, or user-review/fallback;
 - user can choose “insert raw now” while correction is running;
@@ -213,29 +213,34 @@ Recommended Jev questions for one transcript can be evaluated together:
 
 Use calibrated probabilities and explicit thresholds rather than a single opaque “smart” answer.
 
-### Jev / System One evaluation
+### Laya / Jev System One evaluation
 
-Jev is a strong candidate for Smart-mode routing because its output space is predefined and typed, with probabilities/confidence rather than free-form strings. This matches the routing problem much better than asking another generative LLM whether a generative LLM is needed.
+Jev and Laya are strong candidates for Smart-mode routing because their output spaces are predefined and typed, with probabilities/confidence rather than free-form strings. This matches the routing problem much better than asking another generative LLM whether a generative LLM is needed.
+
+Laya is the preferred local candidate to benchmark. It is Apache-2.0, non-autoregressive, small enough for local deployment, supports typed `choice` / `score` / boolean-style decisions, and can be fine-tuned on the exact FlüsterFee routing task. Treat its published Jev comparison cautiously: the Laya project itself states that Jev numbers were not measured on identical samples/prompts; the base checkpoints are weak zero-shot on typed decisions and the strongest reported typed-decision result comes from task-specific fine-tuning. For German, benchmark the multilingual checkpoint and a FlüsterFee-specific fine-tune with explicit temperature calibration before trusting confidence thresholds.
 
 Current integration targets:
 
+- local Laya service/SDK on the GPU host as the preferred local decision-provider experiment;
 - direct TypeSafe API where appropriate;
-- OpenRouter Decisions API as the preferred first cloud integration because FlüsterFee already supports OpenRouter credentials/routing.
+- OpenRouter Decisions API as the preferred cloud integration because FlüsterFee already supports OpenRouter credentials/routing.
 
 OpenRouter currently exposes TypeSafe Jev models including `typesafe/jev-1.13` and an always-latest alias. For reproducible benchmarks and production thresholds, pin a concrete Jev version; use the latest alias only for exploratory testing.
 
 Important architectural constraint: Jev does not belong in `LLMCorrector` as a chat-completion model. Introduce a separate `DecisionProvider` / `SmartRouter` abstraction. OpenRouter’s current Jev examples use its Decisions API, so treat this as a distinct provider capability rather than assuming ordinary chat-completions behavior.
 
-Benchmark Jev against:
+Benchmark decision routing against:
 
 1. deterministic rules only;
-2. a small/fast generative classifier through OpenRouter/local inference;
-3. Jev through OpenRouter;
-4. no routing (always correct).
+2. local Laya multilingual zero-shot;
+3. local Laya fine-tuned/calibrated for FlüsterFee routing;
+4. a small/fast generative classifier through OpenRouter/local inference;
+5. Jev through OpenRouter;
+6. no routing (always correct).
 
 Measure end-to-end Smart-mode latency and total saved correction calls, not just Jev inference speed.
 
-Jev is adopted only if it reduces correction cost/latency at equal or better routing quality. Because it adds a network round-trip, deterministic rules remain first in the cascade.
+A learned decision provider is adopted only if it reduces correction cost/latency at equal or better routing quality. Laya has the architectural advantage of a local zero-network round trip; Jev has the operational advantage of no local model management and a much larger context window. Deterministic rules remain first in the cascade.
 
 ### Polish
 
@@ -298,8 +303,8 @@ For Smart:
 
 1. deterministic zero-cost gate;
 2. optional `SmartRouter` decision provider;
-3. Jev/OpenRouter adapter behind that interface;
-4. confidence thresholds;
+3. local Laya adapter and Jev/OpenRouter adapter behind that interface;
+4. domain-calibrated confidence thresholds;
 5. conditional generative LLM correction;
 6. fallback to deterministic policy on decision-provider errors/timeouts.
 
@@ -350,8 +355,11 @@ The first practical ASR comparison should be:
 For Smart-mode routing, the working hypothesis is:
 
 - deterministic local rules handle obvious cases;
-- **Jev through OpenRouter Decisions** is benchmarked as the fast probabilistic router for ambiguous cases;
+- **Laya locally** is the primary candidate for ambiguous cases where a GPU/CPU decision service is available;
+- **Jev through OpenRouter Decisions** is the cloud comparator/fallback and may be preferable where local deployment is undesirable;
 - the existing local/cloud generative corrector remains responsible for actual rewriting.
+
+Working preference for FlüsterFee: deterministic rules → local calibrated Laya → conditional corrector, with Jev/OpenRouter as benchmark comparator and optional cloud fallback. This preference is provisional until the German FlüsterFee routing corpus is measured.
 
 OpenASR is strategically attractive because it prevents the local architecture from becoming Whisper-only. Speaches is the safer benchmark baseline because it is narrowly focused on a well-established faster-whisper stack.
 
