@@ -37,3 +37,13 @@ def test_invalidating_active_run_rejects_delayed_callbacks():
     gate.invalidate(30)
 
     assert not gate.accepts(30)
+
+
+
+def test_clear_rejects_pending_ui_work_without_needing_run_identity():
+    gate = _RunUiGate()
+    gate.activate(40)
+
+    gate.clear()
+
+    assert not gate.accepts(40)

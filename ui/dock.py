@@ -209,6 +209,9 @@ class _RunUiGate:
         if self.active_run_id == int(run_id):
             self.active_run_id = None
 
+    def clear(self) -> None:
+        self.active_run_id = None
+
     def accepts(self, run_id: int) -> bool:
         return self.active_run_id == int(run_id)
 
@@ -643,6 +646,10 @@ class DockWindow(QWidget):
     def invalidate_run(self, run_id: int) -> None:
         """Reject queued/timed UI work belonging to a cancelled run."""
         self._run_gate.invalidate(run_id)
+
+    def invalidate_active_run(self) -> None:
+        """Reject all queued/timed UI work from the previously active run."""
+        self._run_gate.clear()
 
     def _accept_run(self, run_id: int) -> bool:
         return self._run_gate.accepts(run_id)

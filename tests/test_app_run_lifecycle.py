@@ -257,11 +257,23 @@ def test_begin_run_activates_matching_dock_gate(tmp_path):
     app.dock.activate_run.assert_called_once_with(run.id)
 
 
-def test_cancel_invalidates_matching_dock_gate(tmp_path):
+def test_cancel_clears_dock_gate_for_active_run(tmp_path):
     app = _make_app(tmp_path)
-    run = app._begin_run()
+    app._begin_run()
     app.dock.reset_mock()
 
     app.cancel_current_run()
 
-    app.dock.invalidate_run.assert_called_once_with(run.id)
+    app.dock.invalidate_active_run.assert_called_once_with()
+
+
+def test_cancel_clears_pending_dock_gate_even_after_app_run_finished(tmp_path):
+    app = _make_app(tmp_path)
+    run = app._begin_run()
+    assert app._finish_run_if_current(run)
+    app.dock.reset_mock()
+
+    app.cancel_current_run()
+
+    app.dock.invalidate_active_run.assert_called_once_with()
+    app.dock.set_idle.assert_called_once_with()

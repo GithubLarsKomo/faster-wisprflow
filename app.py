@@ -126,8 +126,9 @@ class App:
                 run.cancel_event.set()
                 self._active_run = None
             self.is_busy = False
-        if run is not None:
-            self.dock.invalidate_run(run.id)
+        # Clear the GUI delivery gate even when the worker has already
+        # finished its App lifecycle but queued Qt events are still pending.
+        self.dock.invalidate_active_run()
         return run
 
     def _finish_run_if_current(self, run: RunContext) -> bool:
@@ -305,7 +306,10 @@ class App:
                 err_msg = f'{t("msg_error", lang)}: {exc}'
                 self.dock.show_error_signal.emit(run.id, err_msg)
             except Exception:
-                QTimer.singleShot(0, self.dock.set_idle)
+                try:
+                    self.dock.mark_idle(run.id)
+                except Exception:
+                    pass
             self._finish_run_if_current(run)
 
     def transcribe_and_insert(self, run: RunContext) -> None:
