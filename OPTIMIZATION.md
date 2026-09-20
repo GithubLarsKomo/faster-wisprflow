@@ -348,6 +348,87 @@ A learned decision provider is adopted only if it reduces correction cost/latenc
 - maximum cleanup;
 - higher latency is explicit.
 
+## GPU/Memory policy
+
+The target GPU is shared with other local AI workloads. Smart mode must therefore improve latency/cost without reserving several additional gigabytes of VRAM permanently.
+
+### Budget principles
+
+- do not require both decision models to remain GPU-resident;
+- prefer a CPU/INT8 or otherwise compact deployment for the primary XLM-R SmartRouter;
+- keep BGE as an uncertainty fallback, not on the hot path for every dictation;
+- GPU acceleration is opportunistic, not required for correctness;
+- expose per-service memory/device status through `/health`;
+- record model resident memory and peak VRAM in the benchmark harness;
+- never evict a larger production model merely to speed up Smart routing.
+
+Current upstream weight sizes underline the need for this policy: `xlm-roberta-base` ships roughly 1.12 GB of full-precision PyTorch/safetensors weights, while `BAAI/bge-reranker-v2-m3` ships roughly 2.27 GB of full-precision model weights. Runtime memory depends on dtype, backend, sequence length and allocator overhead, so selection must use measured resident/peak memory rather than file-size estimates.
+
+### SmartRouter side project
+
+Goal: turn the existing `~/query-classifier` architecture into a compact FlüsterFee decision service without making the shared GPU a hard dependency.
+
+Work:
+
+1. preserve the existing XLM-R multi-head/FastAPI training pattern;
+2. train fresh FlüsterFee routing heads and compare transfer from the existing router checkpoint;
+3. export at least:
+   - PyTorch FP16 GPU reference;
+   - ONNX Runtime CPU reference;
+   - INT8 CPU candidate if quality/calibration remain acceptable;
+4. benchmark batch=1, short sequences representative of dictation;
+5. measure P50/P95 latency, RSS, model load time, CPU utilization and VRAM;
+6. add `/health` fields for backend, dtype, device and measured/estimated resident memory;
+7. target a CPU-capable default so the service can remain available even when the GPU is occupied.
+
+Acceptance for FlüsterFee integration:
+
+- routing quality/calibration meets the held-out corpus gate;
+- warm P95 routing latency remains small compared with ASR completion latency;
+- CPU mode is usable;
+- GPU mode has a configurable VRAM ceiling and is optional.
+
+### BGE reranker side project
+
+Goal: preserve the existing BGE service for retrieval while adding an optional low-memory Smart-routing mode.
+
+Do not replace the existing `/rerank` contract. Add a separate versioned endpoint or mode for prototype routing.
+
+Work:
+
+1. add labelled-prototype batching/aggregation;
+2. benchmark the current FP16 CUDA path;
+3. add CPU execution;
+4. evaluate ONNX Runtime and INT8/dynamic quantization where supported;
+5. consider a smaller multilingual reranker only if `bge-reranker-v2-m3` remains too expensive for the marginal routing gain;
+6. add lazy/on-demand model initialization only for non-interactive paths; do not accept multi-second cold starts in the FlüsterFee hot path;
+7. expose device/dtype/model and memory statistics through `/health`;
+8. make GPU use policy-driven:
+   - use GPU only when configured and sufficient free VRAM is available;
+   - otherwise use CPU or skip BGE and fall back to the next Smart policy.
+
+Acceptance:
+
+- no permanent GPU residency is required for normal FlüsterFee operation;
+- BGE is invoked only for low-confidence primary-router cases;
+- its incremental routing benefit justifies its measured latency and memory cost.
+
+### Runtime cascade under GPU pressure
+
+```text
+Rules
+  ↓
+CPU/INT8 XLM-R SmartRouter
+  ↓ high confidence
+route
+  ↓ low confidence
+BGE available within memory/latency budget?
+  ├─ yes → BGE prototype rerank
+  └─ no  → Jev/OpenRouter or conservative corrector
+```
+
+This makes GPU pressure a performance concern rather than a correctness failure.
+
 ## Implementation sequence
 
 ### O0 — instrumentation
