@@ -213,6 +213,105 @@ Recommended Jev questions for one transcript can be evaluated together:
 
 Use calibrated probabilities and explicit thresholds rather than a single opaque “smart” answer.
 
+### Reuse existing local classifier and BGE reranker
+
+Before adding a new model family, benchmark the user's existing local routing stack.
+
+#### Existing multi-task classifier — primary reuse candidate
+
+The existing query-classifier architecture is already very close to a System-One router:
+
+- multilingual `xlm-roberta-base` encoder;
+- non-autoregressive single-pass inference;
+- one intent classification head;
+- one softmax weighting head;
+- local FastAPI deployment pattern on GPU;
+- existing training/export workflow.
+
+Do not reuse the old task labels directly. Reuse the architecture, training harness and serving pattern.
+
+Recommended FlüsterFee heads:
+
+- `route`: raw / local_cleanup / light_corrector / full_corrector;
+- `likely_asr_error`: binary;
+- `needs_semantic_correction`: binary;
+- `formatting_only`: binary;
+- `meaning_change_risk`: low / medium / high;
+- optional continuous or softmax route-weight head.
+
+Train a fresh FlüsterFee checkpoint from `xlm-roberta-base` and benchmark a second run initialized from the existing router encoder. Keep whichever transfers better. Do not assume the old query-routing weights transfer to dictation cleanup.
+
+Treat calibration as a release requirement:
+
+- held-out FlüsterFee routing set;
+- temperature scaling or another explicit calibration step;
+- report accuracy/F1, Brier score/ECE, confidence margin and selective-risk curves;
+- thresholds chosen from the measured cost of false bypass vs unnecessary correction.
+
+This model is the leading candidate for the local Smart router because it can be specialized to German/multilingual dictation without introducing another runtime family.
+
+#### Existing BGE reranker — secondary/prototype decision layer
+
+The existing `BAAI/bge-reranker-v2-m3` FastAPI service already produces normalized cross-encoder scores for `[query, document]` pairs. Reuse it first as an experimental prototype scorer, not as a calibrated classifier.
+
+Two benchmark modes:
+
+1. **Route-description scoring**
+   - query = ASR transcript;
+   - candidate documents = natural-language descriptions of `raw`, `local_cleanup`, `light_corrector`, `full_corrector`;
+   - batch the four pairs in one request.
+
+2. **Prototype-example scoring**
+   - maintain labelled real examples per route;
+   - score the new transcript against representative examples;
+   - aggregate top-k scores per route;
+   - use score margin/entropy to decide whether the result is confident enough.
+
+The prototype approach is preferred because BGE is trained for relevance ranking rather than route-label probability estimation. Its sigmoid-normalized scores are relevance scores, not calibrated mutually exclusive class probabilities.
+
+Use BGE only after the deterministic gate and preferably only when the primary classifier is uncertain; otherwise the ~568M cross-encoder is unnecessary work for a four-way decision.
+
+#### Proposed local cascade
+
+```text
+ASR
+ ↓
+Vocabulary + deterministic rules
+ ↓
+obvious clean/format-only case?
+ ├─ yes → raw/local cleanup → insert
+ └─ no
+     ↓
+FlüsterFee MultiTaskRouter (XLM-R)
+     ↓
+high calibrated confidence?
+ ├─ yes → selected route
+ └─ no
+     ↓
+optional BGE prototype rerank
+     ↓
+still ambiguous?
+ ├─ no → selected route
+ └─ yes → Jev/OpenRouter or conservative full corrector
+```
+
+This preserves a zero-cloud path while keeping Jev as an external reference/fallback rather than a mandatory hop.
+
+Benchmark variants:
+
+1. deterministic rules only;
+2. existing-architecture XLM-R classifier, fresh fine-tune;
+3. XLM-R classifier initialized from the existing router checkpoint;
+4. BGE route-description scoring;
+5. BGE prototype-example scoring;
+6. XLM-R → BGE uncertainty cascade;
+7. Laya multilingual zero-shot;
+8. Laya FlüsterFee fine-tuned/calibrated;
+9. Jev/OpenRouter;
+10. always correct.
+
+Selection is based on end-to-end release-to-insert latency, routing error cost, calibration, GPU residency cost and avoided generative-correction calls — not headline classifier accuracy alone.
+
 ### Laya / Jev System One evaluation
 
 Jev and Laya are strong candidates for Smart-mode routing because their output spaces are predefined and typed, with probabilities/confidence rather than free-form strings. This matches the routing problem much better than asking another generative LLM whether a generative LLM is needed.
@@ -355,11 +454,13 @@ The first practical ASR comparison should be:
 For Smart-mode routing, the working hypothesis is:
 
 - deterministic local rules handle obvious cases;
-- **Laya locally** is the primary candidate for ambiguous cases where a GPU/CPU decision service is available;
+- **the existing XLM-R MultiTaskRouter architecture, retrained for FlüsterFee, is the primary local candidate**;
+- the existing BGE reranker is tested as an uncertainty/prototype fallback rather than the main classifier;
+- Laya remains a clean external open-source benchmark for a purpose-built System-One architecture;
 - **Jev through OpenRouter Decisions** is the cloud comparator/fallback and may be preferable where local deployment is undesirable;
 - the existing local/cloud generative corrector remains responsible for actual rewriting.
 
-Working preference for FlüsterFee: deterministic rules → local calibrated Laya → conditional corrector, with Jev/OpenRouter as benchmark comparator and optional cloud fallback. This preference is provisional until the German FlüsterFee routing corpus is measured.
+Working preference for FlüsterFee: deterministic rules → calibrated retrained XLM-R router → optional BGE prototype fallback → conditional corrector, with Laya and Jev as benchmark comparators. This preference remains provisional until the German FlüsterFee routing corpus is measured.
 
 OpenASR is strategically attractive because it prevents the local architecture from becoming Whisper-only. Speaches is the safer benchmark baseline because it is narrowly focused on a well-established faster-whisper stack.
 
