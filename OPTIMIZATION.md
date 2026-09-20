@@ -348,13 +348,59 @@ A learned decision provider is adopted only if it reduces correction cost/latenc
 - maximum cleanup;
 - higher latency is explicit.
 
+## System-One concepts adopted from the open-model ecosystem
+
+The open Jev-style ecosystem reinforces several design principles that are directly useful for FlüsterFee. These ideas are adopted independently of any one model implementation.
+
+1. **No generation for routing.** Smart routing should read declared logits/probabilities directly. No prose answer, JSON repair loop or token-by-token decoder is needed.
+2. **One state, many decisions.** The transcript plus local features form one compact state. Route, ASR-error risk, formatting-only and semantic-risk outputs should be produced in one encoder pass / multi-head call where possible.
+3. **Reuse the shared state.** When several criteria inspect the same transcript, encode/prefill the transcript once and fan out decision heads/criteria rather than recomputing the full state. SemIf reports a large speedup from state reuse on repeated criteria; NanoJev similarly evaluates many questions in one forward pass.
+4. **Small specialist before large generalist.** Benchmark our existing XLM-R router against smaller specialist/NLI-style encoders instead of assuming larger models are better.
+5. **Rerankers stay rerankers.** BGE remains a strong retrieval/prototype scorer, but it should not be treated as the primary typed-decision reader unless our corpus proves otherwise.
+6. **State representation is part of the model.** Prefer a compact structured state over arbitrary prompt prose. Candidate fields: transcript, word count, spoken-punctuation hits, vocabulary substitutions, detected language mix, ASR confidence/metadata when available, and deterministic error flags.
+7. **Decision deadlines are first-class.** A late routing result is stale. Reuse FlüsterFee run identity gates: results arriving beyond their latency budget are discarded and can never delay or overwrite a newer run.
+8. **Fail open to a deterministic policy.** If the decision runtime is unavailable, overloaded or low-confidence, continue with raw/local cleanup or the configured conservative corrector.
+9. **Persistent lightweight serving.** Load the selected compact model once and reuse it; never load a model per dictation.
+10. **Calibration is separate from accuracy.** Confidence thresholds are calibrated on FlüsterFee data, not inferred from raw logits or headline benchmark accuracy.
+11. **Code handles deterministic work.** Vocabulary replacement, punctuation commands and simple formatting remain code. The learned model resolves ambiguity only.
+
+### Hard production-runtime rule: no additional PyTorch instance
+
+Training and model export may use PyTorch. **Production Smart inference must not require launching another PyTorch process or CUDA context.**
+
+Preferred end state:
+
+```text
+FlüsterFee
+   ↓ HTTP/IPC
+smart-decision-runtime
+   ├─ ONNX Runtime session: FlüsterFee SmartRouter
+   └─ ONNX Runtime session: optional BGE prototype reranker
+```
+
+Design goals:
+
+- one small process;
+- CPU default;
+- INT8 where quality/calibration permit;
+- no `torch` import in the production image/process;
+- no CUDA context by default;
+- tokenizer/runtime dependencies shared where practical;
+- optional OpenVINO or ONNX execution provider benchmarking;
+- optional GPU execution only if it can reuse an already-running shared service or remains within a strict free-VRAM policy;
+- model training/export stays in a separate development environment or CI artifact pipeline.
+
+If the existing PyTorch BGE service is already running for other workloads, FlüsterFee may reuse that service during migration, but **must not launch a second BGE/PyTorch instance**.
+
 ## GPU/Memory policy
 
 The target GPU is shared with other local AI workloads. Smart mode must therefore improve latency/cost without reserving several additional gigabytes of VRAM permanently.
 
 ### Budget principles
 
+- **do not add another production PyTorch instance for Smart routing**;
 - do not require both decision models to remain GPU-resident;
+- prefer one shared CPU/ONNX Runtime service for the SmartRouter and optional BGE fallback;
 - prefer a CPU/INT8 or otherwise compact deployment for the primary XLM-R SmartRouter;
 - keep BGE as an uncertainty fallback, not on the hot path for every dictation;
 - GPU acceleration is opportunistic, not required for correctness;
@@ -373,13 +419,15 @@ Work:
 1. preserve the existing XLM-R multi-head/FastAPI training pattern;
 2. train fresh FlüsterFee routing heads and compare transfer from the existing router checkpoint;
 3. export at least:
-   - PyTorch FP16 GPU reference;
-   - ONNX Runtime CPU reference;
-   - INT8 CPU candidate if quality/calibration remain acceptable;
-4. benchmark batch=1, short sequences representative of dictation;
-5. measure P50/P95 latency, RSS, model load time, CPU utilization and VRAM;
-6. add `/health` fields for backend, dtype, device and measured/estimated resident memory;
-7. target a CPU-capable default so the service can remain available even when the GPU is occupied.
+   - PyTorch reference for training/benchmark only;
+   - ONNX Runtime CPU production candidate;
+   - INT8 CPU production candidate if quality/calibration remain acceptable;
+4. require the production runtime/container to operate without importing PyTorch;
+5. benchmark batch=1, short sequences representative of dictation;
+6. benchmark one-pass multi-head outputs against separate decision calls;
+7. measure P50/P95 latency, RSS, model load time, CPU utilization and VRAM;
+8. add `/health` fields for backend, dtype, device and measured/estimated resident memory;
+9. target a CPU-capable default so the service can remain available even when the GPU is occupied.
 
 Acceptance for FlüsterFee integration:
 
@@ -397,9 +445,9 @@ Do not replace the existing `/rerank` contract. Add a separate versioned endpoin
 Work:
 
 1. add labelled-prototype batching/aggregation;
-2. benchmark the current FP16 CUDA path;
-3. add CPU execution;
-4. evaluate ONNX Runtime and INT8/dynamic quantization where supported;
+2. benchmark the current FP16 CUDA/PyTorch path only as the migration reference;
+3. export/serve BGE through ONNX Runtime as the preferred production path;
+4. evaluate CPU INT8/dynamic quantization and a torch-free runtime image;
 5. consider a smaller multilingual reranker only if `bge-reranker-v2-m3` remains too expensive for the marginal routing gain;
 6. add lazy/on-demand model initialization only for non-interactive paths; do not accept multi-second cold starts in the FlüsterFee hot path;
 7. expose device/dtype/model and memory statistics through `/health`;
@@ -409,6 +457,8 @@ Work:
 
 Acceptance:
 
+- FlüsterFee does not start a new PyTorch process for BGE;
+- the preferred production path is ONNX Runtime or reuse of an already-running shared service;
 - no permanent GPU residency is required for normal FlüsterFee operation;
 - BGE is invoked only for low-confidence primary-router cases;
 - its incremental routing benefit justifies its measured latency and memory cost.
@@ -482,11 +532,13 @@ Implement Fast / Smart / Polish.
 For Smart:
 
 1. deterministic zero-cost gate;
-2. optional `SmartRouter` decision provider;
-3. local Laya adapter and Jev/OpenRouter adapter behind that interface;
-4. domain-calibrated confidence thresholds;
-5. conditional generative LLM correction;
-6. fallback to deterministic policy on decision-provider errors/timeouts.
+2. torch-free shared `SmartRouter` runtime (ONNX Runtime preferred);
+3. existing XLM-R-derived router as the primary local decision model;
+4. optional BGE prototype scorer inside the same runtime or reuse of an already-running shared BGE service;
+5. Laya/Jev adapters remain benchmark/fallback providers rather than required runtime dependencies;
+6. domain-calibrated confidence thresholds and explicit decision deadlines;
+7. conditional generative LLM correction;
+8. fallback to deterministic policy on decision-provider errors/timeouts.
 
 Do not use Jev to generate corrected prose.
 
