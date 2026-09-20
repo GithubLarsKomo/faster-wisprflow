@@ -246,3 +246,22 @@ def test_begin_run_invalidates_previous_identity(tmp_path):
     assert first.cancel_event.is_set()
     assert not app._is_current_run(first)
     assert app._is_current_run(second)
+
+
+
+def test_begin_run_activates_matching_dock_gate(tmp_path):
+    app = _make_app(tmp_path)
+
+    run = app._begin_run()
+
+    app.dock.activate_run.assert_called_once_with(run.id)
+
+
+def test_cancel_invalidates_matching_dock_gate(tmp_path):
+    app = _make_app(tmp_path)
+    run = app._begin_run()
+    app.dock.reset_mock()
+
+    app.cancel_current_run()
+
+    app.dock.invalidate_run.assert_called_once_with(run.id)

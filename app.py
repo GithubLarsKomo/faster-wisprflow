@@ -104,7 +104,10 @@ class App:
             self._run_counter += 1
             run = RunContext(id=self._run_counter)
             self._active_run = run
-            return run
+        # The dock keeps a separate GUI-thread gate because queued Qt signals
+        # may arrive after the worker-side run check that emitted them.
+        self.dock.activate_run(run.id)
+        return run
 
     def _get_active_run(self) -> RunContext | None:
         with self._run_lock:
@@ -123,7 +126,9 @@ class App:
                 run.cancel_event.set()
                 self._active_run = None
             self.is_busy = False
-            return run
+        if run is not None:
+            self.dock.invalidate_run(run.id)
+        return run
 
     def _finish_run_if_current(self, run: RunContext) -> bool:
         """Clear run/busy state only if *run* is still the active owner."""
@@ -262,6 +267,7 @@ class App:
             self.is_recording = False
             run.cancel_event.set()
             self._finish_run_if_current(run)
+            self.dock.invalidate_run(run.id)
             try:
                 self.recorder.recording = False
             except Exception:
@@ -297,7 +303,7 @@ class App:
             try:
                 lang = self.config.ui_language
                 err_msg = f'{t("msg_error", lang)}: {exc}'
-                self.dock.show_error_signal.emit(err_msg)
+                self.dock.show_error_signal.emit(run.id, err_msg)
             except Exception:
                 QTimer.singleShot(0, self.dock.set_idle)
             self._finish_run_if_current(run)
@@ -334,7 +340,7 @@ class App:
                     return
 
                 if self.config.correction_enabled:
-                    self.dock.mark_correcting()
+                    self.dock.mark_correcting(run.id)
 
                 corrected_text: str | None = None
                 llm_failed: Exception | None = None
@@ -358,7 +364,7 @@ class App:
                 if not self._is_current_run(run):
                     cancelled = True
                     return
-                self.dock.mark_done()
+                self.dock.mark_done(run.id)
 
                 if not self._is_current_run(run):
                     cancelled = True
@@ -369,11 +375,12 @@ class App:
                     pass
 
                 if self._is_current_run(run):
-                    self.dock.schedule_idle(600)
+                    self.dock.schedule_idle(run.id, 600)
                     dock_resolved = True
                     if llm_failed is not None:
                         lang = self.config.ui_language
                         self.dock.show_info_signal.emit(
+                            run.id,
                             t("msg_result_title", lang),
                             t("msg_llm_fallback", lang),
                         )
@@ -383,10 +390,11 @@ class App:
                     return
                 lang = self.config.ui_language
                 self.dock.show_info_signal.emit(
+                    run.id,
                     t("msg_result_title", lang),
                     t("msg_no_speech", lang),
                 )
-                self.dock.mark_idle()
+                self.dock.mark_idle(run.id)
                 dock_resolved = True
 
         except Exception as e:
@@ -394,12 +402,12 @@ class App:
                 cancelled = True
                 return
             if str(e) == "no_audio":
-                self.dock.mark_idle()
+                self.dock.mark_idle(run.id)
                 dock_resolved = True
             else:
                 lang = self.config.ui_language
                 err_msg = f'{t("msg_error", lang)}: {e}'
-                self.dock.show_error_signal.emit(err_msg)
+                self.dock.show_error_signal.emit(run.id, err_msg)
                 dock_resolved = True
 
         finally:
@@ -413,7 +421,7 @@ class App:
             # the active owner can complete the shared lifecycle.
             finished_current = self._finish_run_if_current(run)
             if finished_current and not dock_resolved and not cancelled:
-                self.dock.mark_idle()
+                self.dock.mark_idle(run.id)
 
     def open_settings(self):
         self.event_queue.put("settings")
