@@ -188,11 +188,54 @@ After the ASR baseline is measured, implement three user-facing profiles:
 
 ### Smart — intended default
 
-`ASR → vocabulary/local rules → conditional LLM → insert`
+Preferred decision pipeline:
 
-- local heuristic decides whether correction adds value;
-- cloud/local LLM is skipped for short or already-clean text;
-- user can choose “insert raw now” while correction is running.
+`ASR → vocabulary/local rules → deterministic gate → optional Jev decision gate → conditional corrector → insert`
+
+Rules:
+
+- trivial/short/obviously clean text bypasses all model-based routing;
+- ambiguous runs may be sent to a structured decision model such as TypeSafe Jev;
+- Jev is a router/judge only, never the prose corrector;
+- only a generative correction model may rewrite arbitrary text;
+- a Jev decision can route to raw insert, local cleanup, lightweight corrector, full corrector, or user-review/fallback;
+- user can choose “insert raw now” while correction is running;
+- if Jev is unavailable or exceeds its latency budget, fall back to deterministic routing rather than blocking insertion.
+
+Recommended Jev questions for one transcript can be evaluated together:
+
+- `needs_semantic_correction`: yes/no probability;
+- `likely_asr_error`: yes/no probability;
+- `formatting_only`: yes/no probability;
+- `meaning_change_risk`: low/medium/high choice;
+- `recommended_path`: raw/local_cleanup/light_corrector/full_corrector;
+- optional `domain_term_risk`: yes/no probability.
+
+Use calibrated probabilities and explicit thresholds rather than a single opaque “smart” answer.
+
+### Jev / System One evaluation
+
+Jev is a strong candidate for Smart-mode routing because its output space is predefined and typed, with probabilities/confidence rather than free-form strings. This matches the routing problem much better than asking another generative LLM whether a generative LLM is needed.
+
+Current integration targets:
+
+- direct TypeSafe API where appropriate;
+- OpenRouter Decisions API as the preferred first cloud integration because FlüsterFee already supports OpenRouter credentials/routing.
+
+OpenRouter currently exposes TypeSafe Jev models including `typesafe/jev-1.13` and an always-latest alias. For reproducible benchmarks and production thresholds, pin a concrete Jev version; use the latest alias only for exploratory testing.
+
+Important architectural constraint: Jev does not belong in `LLMCorrector` as a chat-completion model. Introduce a separate `DecisionProvider` / `SmartRouter` abstraction. OpenRouter’s current Jev examples use its Decisions API, so treat this as a distinct provider capability rather than assuming ordinary chat-completions behavior.
+
+Benchmark Jev against:
+
+1. deterministic rules only;
+2. a small/fast generative classifier through OpenRouter/local inference;
+3. Jev through OpenRouter;
+4. no routing (always correct).
+
+Measure end-to-end Smart-mode latency and total saved correction calls, not just Jev inference speed.
+
+Jev is adopted only if it reduces correction cost/latency at equal or better routing quality. Because it adds a network round-trip, deterministic rules remain first in the cascade.
 
 ### Polish
 
@@ -211,6 +254,7 @@ Add per-run timings to `RunContext`:
 - audio ready;
 - first partial;
 - ASR final;
+- routing start/end;
 - LLM start/end;
 - insert start/end.
 
@@ -246,13 +290,24 @@ Run the corpus on the actual target hardware. Store benchmark date, model hashes
 
 Only then choose the default local/realtime/CPU fallback models.
 
-### O5 — Smart mode
+### O5 — Smart mode and decision routing
 
-Implement Fast / Smart / Polish and conditional LLM correction.
+Implement Fast / Smart / Polish.
+
+For Smart:
+
+1. deterministic zero-cost gate;
+2. optional `SmartRouter` decision provider;
+3. Jev/OpenRouter adapter behind that interface;
+4. confidence thresholds;
+5. conditional generative LLM correction;
+6. fallback to deterministic policy on decision-provider errors/timeouts.
+
+Do not use Jev to generate corrected prose.
 
 ### O6 — “raw now”
 
-Once the final raw ASR text is available, allow immediate insertion while an optional correction is still running. Cancelling or superseding the correction must reuse existing run-identity gates.
+Once the final raw ASR text is available, allow immediate insertion while an optional routing/correction request is still running. Cancelling or superseding the correction must reuse existing run-identity gates.
 
 ### O7 — realtime
 
@@ -286,12 +341,18 @@ Evaluate:
 
 ## Current working hypothesis
 
-The first practical comparison should be:
+The first practical ASR comparison should be:
 
 - **Speaches/faster-whisper** on the local GPU server as a strong, mature Whisper baseline;
 - **OpenASR** on the same server and/or Windows as the broader multi-model/realtime candidate;
 - current Groq/OpenAI paths as cloud controls.
 
+For Smart-mode routing, the working hypothesis is:
+
+- deterministic local rules handle obvious cases;
+- **Jev through OpenRouter Decisions** is benchmarked as the fast probabilistic router for ambiguous cases;
+- the existing local/cloud generative corrector remains responsible for actual rewriting.
+
 OpenASR is strategically attractive because it prevents the local architecture from becoming Whisper-only. Speaches is the safer benchmark baseline because it is narrowly focused on a well-established faster-whisper stack.
 
-The final default remains benchmark-driven.
+The final defaults remain benchmark-driven.
