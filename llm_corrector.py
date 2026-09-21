@@ -19,6 +19,10 @@ class LLMCorrector:
         # this session is simply idle when the heuristic gate bypasses the LLM.
         self.session = requests.Session()
 
+    def close(self) -> None:
+        """Release pooled HTTP connections owned by this client."""
+        self.session.close()
+
     def _chat_url(self) -> str:
         provider = get_provider(getattr(self.config, "llm_provider", "Ollama"))
         if provider is not None and provider.chat_url:
