@@ -110,6 +110,18 @@ class TestConfigClass:
         cfg = Config()
         assert isinstance(cfg.restore_clipboard, bool)
 
+    def test_correction_mode_defaults_to_smart(self, tmp_config_path):
+        cfg = Config()
+        assert cfg.correction_mode == "smart"
+
+    def test_invalid_correction_mode_falls_back_to_smart(self, tmp_config_path):
+        tmp_config_path.write_text(
+            json.dumps({**DEFAULT_CONFIG, "correction_mode": "mystery"}),
+            encoding="utf-8",
+        )
+        cfg = Config()
+        assert cfg.correction_mode == "smart"
+
     def test_reload_updates_attributes(self, tmp_config_path):
         cfg = Config()
         tmp_config_path.write_text(
