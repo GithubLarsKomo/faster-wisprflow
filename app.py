@@ -36,6 +36,21 @@ class RunContext:
 
 
 class App:
+    _KEY_NAME_TO_VK = {
+        "ctrl": 0x11,
+        "left ctrl": 0xA2,
+        "right ctrl": 0xA3,
+        "alt": 0x12,
+        "shift": 0x10,
+        "left shift": 0xA0,
+        "right shift": 0xA1,
+        "linke windows": 0x5B,
+        "left windows": 0x5B,
+        "rechte windows": 0x5C,
+        "right windows": 0x5C,
+        "windows": 0x5B,
+    }
+
     def __init__(self):
         self.config = Config()
         self.dock = DockWindow(
@@ -58,6 +73,7 @@ class App:
         self.is_busy = False
         self.event_queue = queue.Queue()
         self.running = True
+        self._user32 = ctypes.windll.user32
 
         # A dictation run remains identifiable even while a cancelled worker is
         # still returning from a blocking HTTP request.  Shared flags are kept
@@ -78,14 +94,29 @@ class App:
         self.config.correction_enabled = enabled
         self.config.raw["correction_enabled"] = enabled
         save_config(self.config.raw)
+        old_llm = self.llm
         self.llm = LLMCorrector(self.config)
+        try:
+            old_llm.close()
+        except Exception:
+            pass
 
     def reload_config(self):
+        old_client = self.client
+        old_llm = self.llm
         self.config.reload()
         self.recorder = Recorder(self.config)
         self.client = WhisperClient(self.config)
         self.inserter = TextInserter(self.config)
         self.llm = LLMCorrector(self.config)
+        try:
+            old_client.close()
+        except Exception:
+            pass
+        try:
+            old_llm.close()
+        except Exception:
+            pass
 
         def _update_dock() -> None:
             self.dock.set_llm_enabled(self.config.correction_enabled)
@@ -141,39 +172,22 @@ class App:
             self.is_busy = False
             return True
 
+    def _get_user32(self):
+        user32 = getattr(self, "_user32", None)
+        if user32 is None:
+            user32 = ctypes.windll.user32
+            self._user32 = user32
+        return user32
+
     def hotkey_pressed(self):
-        """Check if the configured hotkey combination is pressed.
-
-        Uses ``GetAsyncKeyState`` directly instead of the ``keyboard`` library
-        because the library's low-level Windows hook (``SetWindowsHookEx``) is
-        unreliable in some environments — the internal ``_pressed_events`` dict
-        stays empty, so ``keyboard.is_pressed()`` always returns ``False``.
-        ``GetAsyncKeyState`` queries the physical key state directly and is
-        immune to hook-related issues.
-        """
-        _user32 = ctypes.windll.user32
-
-        _KEY_NAME_TO_VK = {
-            "ctrl": 0x11,  # VK_CONTROL
-            "left ctrl": 0xA2,  # VK_LCONTROL
-            "right ctrl": 0xA3,  # VK_RCONTROL
-            "alt": 0x12,  # VK_MENU
-            "shift": 0x10,  # VK_SHIFT
-            "left shift": 0xA0,  # VK_LSHIFT
-            "right shift": 0xA1,  # VK_RSHIFT
-            "linke windows": 0x5B,  # VK_LWIN
-            "left windows": 0x5B,  # VK_LWIN
-            "rechte windows": 0x5C,  # VK_RWIN
-            "right windows": 0x5C,  # VK_RWIN
-            "windows": 0x5B,  # VK_LWIN (fallback)
-        }
+        """Check if the configured hotkey combination is pressed."""
+        user32 = self._get_user32()
 
         def is_key_down(key_name: str) -> bool:
-            vk = _KEY_NAME_TO_VK.get(key_name.lower())
+            vk = self._KEY_NAME_TO_VK.get(key_name.lower())
             if vk is None:
                 return False
-            # 0x8000 = high-order bit (key is currently down)
-            return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
+            return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
         try:
             return all(is_key_down(k) for k in self.config.hotkey_keys)
@@ -182,9 +196,9 @@ class App:
 
     def monitor_hotkey(self):
         was_pressed = False
+        user32 = self._get_user32()
         while self.running:
-            _user32 = ctypes.windll.user32
-            middle_mouse_down = bool(_user32.GetAsyncKeyState(0x04) & 0x8000)
+            middle_mouse_down = bool(user32.GetAsyncKeyState(0x04) & 0x8000)
             pressed = self.hotkey_pressed() or middle_mouse_down
 
             if pressed and not was_pressed:
@@ -446,6 +460,12 @@ class App:
             self.tray.stop()
         except Exception:
             pass
+        for client in (getattr(self, "client", None), getattr(self, "llm", None)):
+            try:
+                if client is not None:
+                    client.close()
+            except Exception:
+                pass
         QApplication.instance().quit()
 
     def run(self):
