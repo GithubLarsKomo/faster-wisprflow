@@ -1,4 +1,3 @@
-import ctypes
 import json
 import sys
 from pathlib import Path
@@ -192,9 +191,8 @@ def _resource(filename: str) -> Path:
 
 
 DEFAULT_CONFIG = {
-    "whisper_url": "http://10.4.190.16",
+    "whisper_url": "http://127.0.0.1",
     "port": 8009,
-    "whisper_token": "",
     "whisper_model": "whisper-large-v3-turbo",
     "whisper_provider": "local",
     "transcription_guidance_enabled": False,
@@ -210,12 +208,9 @@ DEFAULT_CONFIG = {
     "hotkey_keys": ["ctrl", "linke windows"],
     "restore_clipboard": True,
     "audio_filename": "recording.wav",
-    "auto_elevate": True,
-    "start_with_windows": True,
     "correction_enabled": True,
-    "correction_url": "http://10.4.190.16",
+    "correction_url": "http://127.0.0.1",
     "correction_port": 11434,
-    "correction_token": "",
     "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
     "llm_provider": "Ollama",
     "active_corrector_prompt": "default.md",
@@ -339,7 +334,7 @@ class Config:
         self.restore_clipboard = bool(data["restore_clipboard"])
         self.audio_filename = data["audio_filename"]
         self.correction_enabled = bool(data.get("correction_enabled", True))
-        self.correction_url = data.get("correction_url", "http://10.4.190.16")
+        self.correction_url = data.get("correction_url", "http://127.0.0.1")
         self.correction_port = data.get("correction_port", 11434)
         self.correction_token = get_token(
             "correction", data.get("llm_provider", "Ollama")

@@ -1,15 +1,14 @@
 import requests
 
 from config import Config, _build_base_url
+from provider_registry import get_provider, normalize_provider
 
 
 class LLMCorrector:
     """Sends transcribed text to a LLM via the OpenAI-compatible chat completions endpoint.
 
-    Supported backends (auto-detected from ``correction_url``):
-    - Ollama      (default): ``<correction_url>:<correction_port>/v1/chat/completions``
-    - OpenRouter  (URL contains "openrouter.ai"): ``https://openrouter.ai/api/v1/chat/completions``
-    - Groq        (URL contains "groq.com"): ``https://api.groq.com/v1/chat/completions``
+    Provider routing comes from ``provider_registry.py``. Local/OpenAI-compatible
+    servers use ``<correction_url>:<correction_port>/v1/chat/completions``.
 
     The system prompt is sent as the ``system`` role; the raw text as the ``user`` role.
     """
@@ -18,20 +17,39 @@ class LLMCorrector:
         self.config = config
 
     def _chat_url(self) -> str:
-        provider = getattr(self.config, "llm_provider", "Ollama")
-        if provider == "Openrouter":
-            return "https://openrouter.ai/api/v1/chat/completions"
-        if provider == "Groq":
-            return "https://api.groq.com/v1/chat/completions"
-        if provider == "OpenAI":
-            return "https://api.openai.com/v1/chat/completions"
-        if provider == "Anthropic":
-            return "https://api.anthropic.com/v1/messages"
+        provider = get_provider(getattr(self.config, "llm_provider", "Ollama"))
+        if provider is not None and provider.chat_url:
+            return provider.chat_url
         base = _build_base_url(self.config.correction_url, self.config.correction_port)
         return base.rstrip("/") + "/v1/chat/completions"
 
     def _is_anthropic(self) -> bool:
-        return getattr(self.config, "llm_provider", "Ollama") == "Anthropic"
+        return (
+            normalize_provider(getattr(self.config, "llm_provider", "Ollama"))
+            == "anthropic"
+        )
+
+    def _max_output_tokens(self, text: str) -> int:
+        """Choose a correction budget large enough to preserve dictated text.
+
+        The configured value remains the floor. For longer dictation, grow the
+        budget conservatively but keep it within roughly half of the configured
+        context window so prompt + input still have room. Truncation is still
+        handled explicitly from provider finish/stop reasons.
+        """
+        try:
+            configured = max(32, int(self.config.max_tokens))
+        except (TypeError, ValueError):
+            configured = 220
+        try:
+            num_ctx = max(256, int(getattr(self.config, "num_ctx", 1024)))
+        except (TypeError, ValueError):
+            num_ctx = 1024
+
+        # A conservative character-to-token estimate for multilingual text.
+        estimated = max(64, (len(text.strip()) + 2) // 3 + 48)
+        ceiling = max(configured, num_ctx // 2)
+        return min(max(configured, estimated), ceiling)
 
     def _build_anthropic_request(self, text: str) -> tuple[dict, dict]:
         """Return (headers, payload) for an Anthropic Messages API request."""
@@ -50,7 +68,7 @@ class LLMCorrector:
         )
         payload = {
             "model": self.config.correction_model,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": self._max_output_tokens(text),
             "system": system_prompt,
             "messages": [{"role": "user", "content": user_content}],
         }
@@ -87,14 +105,16 @@ class LLMCorrector:
             ],
             "temperature": self.config.temperature,
             "top_p": self.config.top_p,
-            "max_tokens": self.config.max_tokens,
+            "max_tokens": self._max_output_tokens(text),
             "stream": False,
         }
         # Disable reasoning tokens on providers that support the field.
         # Reasoning models return content=None when reasoning consumes the whole
         # response — turning it off ensures a plain-text reply is always returned.
-        provider = getattr(self.config, "llm_provider", "Ollama")
-        if provider == "Openrouter":
+        provider_id = normalize_provider(
+            getattr(self.config, "llm_provider", "Ollama")
+        )
+        if provider_id == "openrouter":
             payload["reasoning"] = {"effort": "none"}
         return headers, payload
 
@@ -138,8 +158,14 @@ class LLMCorrector:
         orig_words = original.split()
         if not orig_words:
             return True
-        # A correction should not be dramatically longer than the original
-        if len(result.split()) > len(orig_words) * 3 + 15:
+        result_words = result.split()
+        # A correction should not be dramatically longer than the original.
+        if len(result_words) > len(orig_words) * 3 + 15:
+            return False
+        # For non-trivial dictation, losing most of the words is more likely a
+        # truncation/summary/meta-response than a legitimate cleanup. Prefer the
+        # complete raw transcript in ambiguous cases.
+        if len(orig_words) >= 8 and len(result_words) < max(3, len(orig_words) // 2):
             return False
         return True
 
@@ -163,6 +189,8 @@ class LLMCorrector:
                     err.get("message", str(err)) if isinstance(err, dict) else str(err)
                 )
                 raise ValueError(msg)
+            if data.get("stop_reason") == "max_tokens":
+                raise ValueError("Model response was truncated at max_tokens")
             content = data.get("content") or []
             if not content:
                 raise ValueError(f"Empty response from Anthropic: {data}")
@@ -179,7 +207,10 @@ class LLMCorrector:
         choices = data.get("choices") or []
         if not choices:
             raise ValueError(f"Empty response from API: {data}")
-        message = choices[0].get("message", {})
+        choice = choices[0]
+        if choice.get("finish_reason") == "length":
+            raise ValueError("Model response was truncated at the token limit")
+        message = choice.get("message", {})
         content = message.get("content")
         if content is None:
             if message.get("refusal"):
@@ -213,7 +244,10 @@ class LLMCorrector:
             )
             if not resp.ok:
                 raise RuntimeError(f"HTTP {resp.status_code} — {resp.text}")
-            content = resp.json().get("content") or []
+            data = resp.json()
+            if data.get("stop_reason") == "max_tokens":
+                return text
+            content = data.get("content") or []
             result = (content[0].get("text") or "").strip() if content else ""
             result = (
                 result.removeprefix("<text_to_correct>")
@@ -227,7 +261,15 @@ class LLMCorrector:
         resp = self._post_openai_compat(headers, payload)
         if not resp.ok:
             raise RuntimeError(f"HTTP {resp.status_code} — {resp.text}")
-        result = (resp.json()["choices"][0]["message"]["content"] or "").strip()
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return text
+        choice = choices[0]
+        if choice.get("finish_reason") == "length":
+            return text
+        message = choice.get("message") or {}
+        result = (message.get("content") or "").strip()
         # Strip XML tags echoed back by some models
         result = (
             result.removeprefix("<text_to_correct>")

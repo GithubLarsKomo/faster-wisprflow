@@ -352,8 +352,12 @@ class TextInserter:
         _send_ctrl_c()
         time.sleep(0.04)
         snippet = _get_clipboard_text()
-        for _ in range(max(1, int(lookback))):
-            _send_right()
+
+        # Shift+Left leaves a selection whose right boundary is the original
+        # caret position. A single unmodified Right collapses that selection to
+        # its right boundary. Repeating Right would move the caret beyond its
+        # original position in normal Windows edit controls.
+        _send_right()
 
         # Restore the original clipboard *immediately* so insert_text() can
         # later save and restore it without the peek interfering.

@@ -7,13 +7,10 @@ import time
 from enum import Enum, auto
 
 from PySide6.QtCore import (
-    Property,
     QEasingCurve,
-    QEvent,
     QPoint,
     QPropertyAnimation,
     QRect,
-    QSize,
     Qt,
     QTimer,
     Signal,
@@ -199,6 +196,26 @@ class _MSG(ctypes.Structure):
 # ── Main dock window ─────────────────────────────────────────────────────────
 
 
+class _RunUiGate:
+    """Pure run-identity gate used at the GUI delivery boundary."""
+
+    def __init__(self) -> None:
+        self.active_run_id: int | None = None
+
+    def activate(self, run_id: int) -> None:
+        self.active_run_id = int(run_id)
+
+    def invalidate(self, run_id: int) -> None:
+        if self.active_run_id == int(run_id):
+            self.active_run_id = None
+
+    def clear(self) -> None:
+        self.active_run_id = None
+
+    def accepts(self, run_id: int) -> bool:
+        return self.active_run_id == int(run_id)
+
+
 class DockWindow(QWidget):
     """
     Translucent always-on-top dock at the bottom of the screen.
@@ -209,8 +226,8 @@ class DockWindow(QWidget):
     quit_requested = Signal()
     cancel_requested = Signal()  # emitted by the ✕ button during recording/processing
     config_saved = Signal()
-    show_error_signal = Signal(str)
-    show_info_signal = Signal(str, str)  # title, body
+    show_error_signal = Signal(int, str)  # run_id, message
+    show_info_signal = Signal(int, str, str)  # run_id, title, body
     llm_toggled = Signal(bool)  # emitted when the LLM badge is clicked
 
     # ── thread-safe dock-state helpers ────────────────────────────────────
@@ -219,9 +236,9 @@ class DockWindow(QWidget):
     # set_idle / set_processing methods touch QWidget state and must run on
     # the main thread. Emitting these signals from the worker is the
     # canonical Qt-safe way to schedule them on the dock's thread.
-    _correcting_requested = Signal()
-    _done_requested = Signal()
-    _idle_requested = Signal(int)  # delay_ms
+    _correcting_requested = Signal(int)  # run_id
+    _done_requested = Signal(int)  # run_id
+    _idle_requested = Signal(int, int)  # run_id, delay_ms
 
     def __init__(
         self,
@@ -231,7 +248,6 @@ class DockWindow(QWidget):
         on_config_saved=None,
         on_llm_toggled=None,
     ) -> None:
-        app = QApplication.instance()
         super().__init__(
             None, Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
@@ -259,6 +275,7 @@ class DockWindow(QWidget):
         self._anim: QPropertyAnimation | None = None
         self._animating: bool = False
         self._llm_active: bool = False
+        self._run_gate = _RunUiGate()
 
         # ── connect optional callbacks to signals ──────────────────────────
         if on_open_settings:
@@ -270,15 +287,17 @@ class DockWindow(QWidget):
         if on_llm_toggled:
             self.llm_toggled.connect(on_llm_toggled)
 
-        self.show_error_signal.connect(self.show_error)
-        self.show_info_signal.connect(self._show_info_slot)
+        self.show_error_signal.connect(self._show_run_error)
+        self.show_info_signal.connect(self._show_run_info)
 
-        # Wire the thread-safe state-request signals to the actual methods.
+        # Wire the thread-safe state-request signals to run-aware slots. A
+        # queued event emitted by an old worker can therefore never mutate the
+        # UI after a newer run has been activated.
         # Qt's signal-slot system automatically delivers the slot invocation
         # on the receiver's thread (the main thread for the dock), so the
         # worker thread can safely emit these.
-        self._correcting_requested.connect(self.set_correcting)
-        self._done_requested.connect(self.set_done)
+        self._correcting_requested.connect(self._on_correcting_requested)
+        self._done_requested.connect(self._on_done_requested)
         self._idle_requested.connect(self._on_idle_requested)
 
         # ── build UI ───────────────────────────────────────────────────────
@@ -619,36 +638,62 @@ class DockWindow(QWidget):
         self._on_timeout_cb = None
         self._goto_state(DockState.IDLE)
 
+    # ── run-aware GUI delivery gate ───────────────────────────────────────
+    def activate_run(self, run_id: int) -> None:
+        """Make *run_id* the only run allowed to mutate run-bound UI state."""
+        self._run_gate.activate(run_id)
+
+    def invalidate_run(self, run_id: int) -> None:
+        """Reject queued/timed UI work belonging to a cancelled run."""
+        self._run_gate.invalidate(run_id)
+
+    def invalidate_active_run(self) -> None:
+        """Reject all queued/timed UI work from the previously active run."""
+        self._run_gate.clear()
+
+    def _accept_run(self, run_id: int) -> bool:
+        return self._run_gate.accepts(run_id)
+
     # ── thread-safe wrappers ──────────────────────────────────────────────
-    # These are safe to call from ANY thread. They emit Qt signals that are
-    # delivered to the dock's own thread (the GUI thread) automatically by
-    # Qt's signal-slot mechanism. The actual state transitions therefore
-    # always happen on the GUI thread, even when called from a background
-    # worker. This is the canonical Qt pattern and replaces the unreliable
-    # QTimer.singleShot(0, callable) approach that occasionally dropped
-    # events when the worker thread was in a transient bad state.
-    def mark_correcting(self) -> None:
-        """Switch the dock to the CORRECTING state from any thread."""
-        self._correcting_requested.emit()
+    def mark_correcting(self, run_id: int) -> None:
+        """Request CORRECTING for *run_id* from any thread."""
+        self._correcting_requested.emit(int(run_id))
 
-    def mark_done(self) -> None:
-        """Switch the dock to the DONE state from any thread."""
-        self._done_requested.emit()
+    def mark_done(self, run_id: int) -> None:
+        """Request DONE for *run_id* from any thread."""
+        self._done_requested.emit(int(run_id))
 
-    def mark_idle(self) -> None:
-        """Switch the dock to the IDLE state from any thread."""
-        self._idle_requested.emit(0)
+    def mark_idle(self, run_id: int) -> None:
+        """Request IDLE for *run_id* from any thread."""
+        self._idle_requested.emit(int(run_id), 0)
 
-    def schedule_idle(self, delay_ms: int) -> None:
-        """Switch the dock to IDLE after *delay_ms* ms, from any thread."""
-        self._idle_requested.emit(int(delay_ms))
+    def schedule_idle(self, run_id: int, delay_ms: int) -> None:
+        """Request a guarded delayed IDLE transition for *run_id*."""
+        self._idle_requested.emit(int(run_id), int(delay_ms))
 
-    def _on_idle_requested(self, delay_ms: int) -> None:
-        """Slot for _idle_requested — runs on the dock's thread (GUI)."""
+    def _on_correcting_requested(self, run_id: int) -> None:
+        if self._accept_run(run_id):
+            self.set_correcting()
+
+    def _on_done_requested(self, run_id: int) -> None:
+        if self._accept_run(run_id):
+            self.set_done()
+
+    def _set_idle_if_run(self, run_id: int) -> None:
+        if self._accept_run(run_id):
+            self.set_idle()
+
+    def _on_idle_requested(self, run_id: int, delay_ms: int) -> None:
+        """Run-aware slot for queued and delayed IDLE requests."""
+        if not self._accept_run(run_id):
+            return
         if delay_ms <= 0:
             self.set_idle()
         else:
-            QTimer.singleShot(delay_ms, self.set_idle)
+            QTimer.singleShot(
+                delay_ms,
+                lambda rid=run_id: self._set_idle_if_run(rid),
+            )
 
     def set_processing(self) -> None:
         self._rec_timer.stop()
@@ -674,16 +719,15 @@ class DockWindow(QWidget):
         self._goto_state(DockState.CORRECTING)
         self._dot_timer.start()
 
-    def set_done(self, hold_ms: int = T.DONE_HOLD_MS) -> None:
+    def set_done(self) -> None:
         self._dot_timer.stop()
         self._status_lbl.setText("✓ " + self._tr.get("dock_done", "Eingefügt"))
         self._status_lbl.setStyleSheet(
             "QLabel { color: #6ee7b7; font-size: 13px; background: transparent; }"
         )
         self._goto_state(DockState.DONE)
-        QTimer.singleShot(hold_ms, self.set_idle)
 
-    def show_error(self, msg: str) -> None:
+    def show_error(self, msg: str, run_id: int | None = None) -> None:
         self._dot_timer.stop()
         self._rec_timer.stop()
         self._status_lbl.setText(f"✗ {msg}")
@@ -691,7 +735,13 @@ class DockWindow(QWidget):
             "QLabel { color: #f87171; font-size: 12px; background: transparent; }"
         )
         self._goto_state(DockState.ERROR)
-        QTimer.singleShot(T.ERROR_HOLD_MS, self.set_idle)
+        if run_id is None:
+            QTimer.singleShot(T.ERROR_HOLD_MS, self.set_idle)
+        else:
+            QTimer.singleShot(
+                T.ERROR_HOLD_MS,
+                lambda rid=run_id: self._set_idle_if_run(rid),
+            )
 
     def show(self, text: str = "") -> None:
         """Overlay-compatible: show an info/error pill message."""
@@ -761,7 +811,13 @@ class DockWindow(QWidget):
         dots = ["●○○", "●●○", "●●●"][self._dot_count]
         self._status_lbl.setText(dots)
 
-    def _show_info_slot(self, title: str, body: str) -> None:
+    def _show_run_error(self, run_id: int, msg: str) -> None:
+        if self._accept_run(run_id):
+            self.show_error(msg, run_id=run_id)
+
+    def _show_run_info(self, run_id: int, title: str, body: str) -> None:
+        if not self._accept_run(run_id):
+            return
         from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.information(None, title, body)

@@ -12,11 +12,11 @@ import requests
 import sounddevice as sd
 import soundfile as sf
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDialogButtonBox,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QFormLayout, QFrame, QGridLayout, QGroupBox,
                                QHBoxLayout, QLabel, QLineEdit, QListWidget,
                                QMessageBox, QProgressBar, QPushButton,
-                               QScrollArea, QSizePolicy, QSplitter, QStyle,
+                               QScrollArea, QSplitter, QStyle,
                                QTableWidget, QTableWidgetItem, QTextEdit,
                                QVBoxLayout, QWidget)
 
@@ -24,11 +24,17 @@ from config import (_DEFAULT_SYSTEM_PROMPT,
                     _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT, DEFAULT_CONFIG,
                     DEFAULT_CORRECTOR_PROMPT_FILE, Config, _build_base_url,
                     delete_corrector_prompt, get_token, list_corrector_prompts,
-                    load_config, load_corrector_prompt, load_system_prompt,
+                    load_config, load_corrector_prompt,
                     load_transcription_initial_prompt, save_config,
-                    save_corrector_prompt, save_system_prompt,
+                    save_corrector_prompt,
                     save_transcription_initial_prompt, set_token)
 from llm_corrector import LLMCorrector
+from provider_registry import (
+    get_provider,
+    llm_provider_labels,
+    normalize_provider,
+    transcription_provider_labels,
+)
 from ui.theme import SETTINGS_STYLESHEET
 from ui.translations import LANG_CODES, TRANSLATIONS
 from ui.utils import _target_monitor
@@ -198,10 +204,6 @@ class SettingsWindow:
         self._restore_chk.setChecked(cfg["restore_clipboard"])
         gen_form.addRow("", self._restore_chk)
 
-        self._elevate_chk = QCheckBox(tr["auto_elevate"])
-        self._elevate_chk.setChecked(cfg.get("auto_elevate", False))
-        gen_form.addRow("", self._elevate_chk)
-
         self._ui_lang_combo = QComboBox()
         self._ui_lang_combo.addItems(LANG_CODES)
         cur_ui_lang = cfg.get("ui_language", "de")
@@ -361,7 +363,6 @@ class SettingsWindow:
         hotkey_raw = self._hotkey_edit.text().strip()
         cfg["hotkey_keys"] = [k.strip() for k in hotkey_raw.split("+") if k.strip()]
         cfg["restore_clipboard"] = self._restore_chk.isChecked()
-        cfg["auto_elevate"] = self._elevate_chk.isChecked()
         cfg["ui_language"] = self._ui_lang_combo.currentText()
         cfg["proxy"] = self._proxy_edit.text().strip()
         cfg["language"] = self._lang_combo.currentText()
@@ -600,7 +601,7 @@ class SettingsWindow:
         form.setLabelAlignment(Qt.AlignRight)
         form.setSpacing(6)
 
-        providers = ["local", "Groq", "Openrouter", "OpenAI"]
+        providers = transcription_provider_labels()
         prov_combo = QComboBox()
         prov_combo.addItems(providers)
         cur_prov = cfg.get("whisper_provider", "local")
@@ -643,11 +644,12 @@ class SettingsWindow:
         _cloud_rows = [_token_row, _model_row]
 
         def _on_prov_change(prov: str) -> None:
-            is_local = prov == "local"
+            is_local = normalize_provider(prov) == "local"
             for r in _http_rows:
                 form.setRowVisible(r, is_local)
             for r in _cloud_rows:
                 form.setRowVisible(r, True)
+            token_edit.setText(get_token("whisper", prov))
 
         prov_combo.currentTextChanged.connect(_on_prov_change)
         _on_prov_change(prov_combo.currentText())
@@ -742,15 +744,12 @@ class SettingsWindow:
                 url_edit.text().strip(),
                 int(raw_port) if raw_port else None,
             )
-            if prov == "local":
+            provider = get_provider(prov)
+            if normalize_provider(prov) == "local":
                 ep = health_edit.text().strip().lstrip("/")
                 url = base.rstrip("/") + "/" + ep
-            elif prov == "Groq":
-                url = "https://api.groq.com/openai/v1/models"
-            elif prov == "Openrouter":
-                url = "https://openrouter.ai/api/v1/models"
-            elif prov == "OpenAI":
-                url = "https://api.openai.com/v1/models"
+            elif provider is not None and provider.transcription_models_url:
+                url = provider.transcription_models_url
             else:
                 return
             result_box: list = [None]
@@ -992,15 +991,7 @@ class SettingsWindow:
         dlg.finished.connect(lambda _: setattr(self, "_llm_enabled_chk", None))
         llm_form.addRow("", enabled_chk)
 
-        llm_providers = [
-            "Ollama",
-            "LM Studio",
-            "Groq",
-            "Openrouter",
-            "OpenAI",
-            "Anthropic",
-            "Azure OpenAI",
-        ]
+        llm_providers = llm_provider_labels()
         prov_combo = QComboBox()
         prov_combo.addItems(llm_providers)
         cur_prov = cfg.get("llm_provider", "Ollama")
@@ -1019,7 +1010,11 @@ class SettingsWindow:
         token_edit.setEchoMode(QLineEdit.Password)
         llm_form.addRow(tr["token"], token_edit)
 
-        _CLOUD_LLM_PROVIDERS = {"Groq", "Openrouter", "OpenAI", "Anthropic"}
+        _CLOUD_LLM_PROVIDERS = {
+            label
+            for label in llm_providers
+            if (get_provider(label) is not None and get_provider(label).chat_url)
+        }
 
         # model row with refresh button (editable combobox populated from provider)
         # NOTE: must be created before _on_llm_prov_change, which triggers a refresh.
@@ -1041,30 +1036,24 @@ class SettingsWindow:
             prov: str, base: str, tok: str
         ) -> tuple[str, dict] | None:
             """Return the (url, headers) for listing models of *prov*, or None."""
-            if prov == "Ollama":
+            provider_id = normalize_provider(prov)
+            provider = get_provider(prov)
+            if provider_id == "ollama":
                 return base.rstrip("/") + "/api/tags", {}
-            if prov in ("LM Studio", "Azure OpenAI"):
+            if provider_id in ("lm_studio", "azure_openai"):
                 return base.rstrip("/") + "/v1/models", (
                     {"Authorization": f"Bearer {tok}"} if tok else {}
                 )
-            if prov == "OpenAI":
-                return "https://api.openai.com/v1/models", (
-                    {"Authorization": f"Bearer {tok}"} if tok else {}
-                )
-            if prov == "Groq":
-                return "https://api.groq.com/openai/v1/models", (
-                    {"Authorization": f"Bearer {tok}"} if tok else {}
-                )
-            if prov == "Openrouter":
-                return "https://openrouter.ai/api/v1/models", (
-                    {"Authorization": f"Bearer {tok}"} if tok else {}
-                )
-            if prov == "Anthropic":
-                return "https://api.anthropic.com/v1/models", {
+            if provider is None or not provider.models_url:
+                return None
+            if provider.auth_style == "anthropic":
+                return provider.models_url, {
                     "x-api-key": tok,
                     "anthropic-version": "2023-06-01",
                 }
-            return None
+            return provider.models_url, (
+                {"Authorization": f"Bearer {tok}"} if tok else {}
+            )
 
         def _parse_models(prov: str, data: dict) -> list[str]:
             """Extract a list of model names/ids from a provider's JSON response."""
@@ -1191,7 +1180,7 @@ class SettingsWindow:
         form_lay.addWidget(llm_box)
 
         # ── Model parameters ───────────────────────────────────────────────
-        params_box = QGroupBox(" Model Parameters ")
+        params_box = QGroupBox(tr["model_parameters_frame"])
         params_grid = QGridLayout(params_box)
         params_grid.setSpacing(6)
         params_grid.setColumnMinimumWidth(1, 80)
@@ -1447,27 +1436,15 @@ class SettingsWindow:
         def _do_llm_health() -> None:
             prov = prov_combo.currentText()
             tok = token_edit.text().strip()
-            headers = {"Authorization": f"Bearer {tok}"} if tok else {}
             raw_port = port_edit.text().strip()
             base = _build_base_url(
                 url_edit.text().strip(),
                 int(raw_port) if raw_port else None,
             )
-            if prov == "Ollama":
-                url = base.rstrip("/") + "/api/tags"
-            elif prov in ("LM Studio", "Azure OpenAI"):
-                url = base.rstrip("/") + "/v1/models"
-            elif prov == "Groq":
-                url = "https://api.groq.com/openai/v1/models"
-            elif prov == "Openrouter":
-                url = "https://openrouter.ai/api/v1/models"
-            elif prov == "OpenAI":
-                url = "https://api.openai.com/v1/models"
-            elif prov == "Anthropic":
-                url = "https://api.anthropic.com/v1/models"
-                headers = {"x-api-key": tok, "anthropic-version": "2023-06-01"}
-            else:
+            target = _models_url_and_headers(prov, base, tok)
+            if target is None:
                 return
+            url, headers = target
             result_box: list = [None]
             health_btn.setEnabled(False)
 

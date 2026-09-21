@@ -1,5 +1,6 @@
 """Tests for whisper_client.py — WhisperClient."""
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, mock_open, patch
 
@@ -42,13 +43,13 @@ class TestTranscribeRouting:
     def test_routes_to_groq(self):
         wc = WhisperClient(make_stub_config(whisper_provider="Groq"))
         with patch.object(wc, "_transcribe_groq", return_value="text") as m:
-            result = wc.transcribe(Path("audio.wav"))
+            wc.transcribe(Path("audio.wav"))
         m.assert_called_once()
 
     def test_routes_to_custom_for_local(self):
         wc = WhisperClient(make_stub_config(whisper_provider="local"))
         with patch.object(wc, "_transcribe_custom", return_value="text") as m:
-            result = wc.transcribe(Path("audio.wav"))
+            wc.transcribe(Path("audio.wav"))
         m.assert_called_once()
 
     def test_routes_to_custom_for_unknown_provider(self):
@@ -264,3 +265,73 @@ class TestTranscribeGroq:
             result = wc._transcribe_groq(audio_path)
 
         assert result == "Groq result"
+
+
+# ---------------------------------------------------------------------------
+# provider-specific transcription request contracts
+# ---------------------------------------------------------------------------
+
+
+class TestProviderRequestContracts:
+    def test_openrouter_guidance_uses_provider_options_not_invalid_top_level_prompt(self):
+        wc = WhisperClient(
+            make_stub_config(
+                whisper_token="or-token",
+                whisper_model="openai/whisper-1",
+                language="de",
+                transcription_guidance_enabled=True,
+                transcription_initial_prompt="Expected vocabulary {{language}}",
+            )
+        )
+        audio_path = MagicMock(spec=Path)
+        audio_path.name = "audio.wav"
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"text": "ok"}
+
+        with (
+            patch("builtins.open", mock_open(read_data=b"abc")),
+            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+        ):
+            wc._transcribe_openrouter(audio_path)
+
+        assert (
+            mock_post.call_args.args[0]
+            == "https://openrouter.ai/api/v1/audio/transcriptions"
+        )
+        payload = json.loads(mock_post.call_args.kwargs["data"])
+        assert "prompt" not in payload
+        assert "initial_prompt" not in payload
+        assert payload["provider"]["options"]["groq"]["prompt"] == (
+            "Expected vocabulary de"
+        )
+
+    def test_groq_guidance_uses_supported_prompt_only(self):
+        wc = WhisperClient(
+            make_stub_config(
+                whisper_token="groq-token",
+                whisper_model="whisper-large-v3-turbo",
+                language="de",
+                transcription_guidance_enabled=True,
+                transcription_initial_prompt="Expected vocabulary {{language}}",
+            )
+        )
+        audio_path = MagicMock(spec=Path)
+        audio_path.name = "audio.wav"
+        mock_resp = MagicMock()
+        mock_resp.raise_for_status = MagicMock()
+        mock_resp.json.return_value = {"text": "ok"}
+
+        with (
+            patch("builtins.open", mock_open(read_data=b"abc")),
+            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+        ):
+            wc._transcribe_groq(audio_path)
+
+        assert (
+            mock_post.call_args.args[0]
+            == "https://api.groq.com/openai/v1/audio/transcriptions"
+        )
+        form = mock_post.call_args.kwargs["data"]
+        assert form["prompt"] == "Expected vocabulary de"
+        assert "initial_prompt" not in form

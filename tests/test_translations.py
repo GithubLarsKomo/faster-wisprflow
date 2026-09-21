@@ -71,6 +71,11 @@ _REQUIRED_KEYS = [
     "msg_no_audio",
     "msg_no_speech",
     "msg_result_title",
+    # Tray / startup
+    "tray_settings",
+    "tray_quit",
+    "msg_already_running",
+    "model_parameters_frame",
 ]
 
 

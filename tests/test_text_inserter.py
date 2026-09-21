@@ -1,9 +1,8 @@
 """Tests for text_inserter.py — clipboard helpers and TextInserter."""
 
 import ctypes
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 
 from tests.conftest import make_stub_config
 from text_inserter import (
@@ -302,3 +301,31 @@ class TestTextInserter:
             ti.insert_text("hallo welt")
 
         mock_probe.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# cursor-context probe
+# ---------------------------------------------------------------------------
+
+
+class TestCursorContextProbe:
+    def test_peek_restores_caret_with_single_right_collapse(self):
+        ti = TextInserter(make_stub_config(transcription_guidance_enabled=True))
+
+        with (
+            patch(
+                "text_inserter._get_clipboard_text",
+                side_effect=["saved clipboard", "abc"],
+            ),
+            patch("text_inserter._set_clipboard_text", return_value=True),
+            patch("text_inserter._send_shift_left") as mock_shift_left,
+            patch("text_inserter._send_ctrl_c") as mock_copy,
+            patch("text_inserter._send_right") as mock_right,
+            patch("text_inserter.time.sleep"),
+        ):
+            result = ti._peek_previous_non_space_char(lookback=3)
+
+        assert result == "c"
+        assert mock_shift_left.call_count == 3
+        mock_copy.assert_called_once_with()
+        mock_right.assert_called_once_with()
