@@ -194,7 +194,7 @@ class App:
                 self.event_queue.put("stop")
 
             was_pressed = pressed
-            time.sleep(0.03)
+            time.sleep(0.015)
 
     def process_events(self):
         try:
@@ -264,7 +264,7 @@ class App:
 
                 QTimer.singleShot(50, _poll_rms)
 
-            QTimer.singleShot(100, _start_popup)
+            QTimer.singleShot(0, _start_popup)
         except Exception:
             self.is_recording = False
             run.cancel_event.set()
@@ -452,9 +452,10 @@ class App:
         threading.Thread(target=self.monitor_hotkey, daemon=True).start()
         threading.Thread(target=self.tray.run, daemon=True).start()
 
-        # poll event queue every 50 ms on the Qt main thread
+        # Keep push-to-talk start/stop responsive without introducing a native
+        # global hook dependency.
         self._event_timer = QTimer()
-        self._event_timer.setInterval(50)
+        self._event_timer.setInterval(20)
         self._event_timer.timeout.connect(self.process_events)
         self._event_timer.start()
 
