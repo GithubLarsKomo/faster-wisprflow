@@ -15,6 +15,9 @@ class LLMCorrector:
 
     def __init__(self, config: Config) -> None:
         self.config = config
+        # Keep HTTP/TLS connections warm between corrections. In Smart mode
+        # this session is simply idle when the heuristic gate bypasses the LLM.
+        self.session = requests.Session()
 
     def _chat_url(self) -> str:
         provider = get_provider(getattr(self.config, "llm_provider", "Ollama"))
@@ -130,7 +133,7 @@ class LLMCorrector:
         still bounding the wait.
         """
         timeout = (5, 30)
-        resp = requests.post(
+        resp = self.session.post(
             self._chat_url(),
             json=payload,
             timeout=timeout,
@@ -143,7 +146,7 @@ class LLMCorrector:
             and "mandatory" in resp.text.lower()
         ):
             payload = {k: v for k, v in payload.items() if k != "reasoning"}
-            resp = requests.post(
+            resp = self.session.post(
                 self._chat_url(),
                 json=payload,
                 timeout=timeout,
@@ -173,7 +176,7 @@ class LLMCorrector:
         """Like correct(), but raises on any HTTP or API error (used for testing)."""
         if self._is_anthropic():
             headers, payload = self._build_anthropic_request(text)
-            resp = requests.post(
+            resp = self.session.post(
                 self._chat_url(),
                 json=payload,
                 timeout=(5, 30),
@@ -235,7 +238,7 @@ class LLMCorrector:
             return text
         if self._is_anthropic():
             headers, payload = self._build_anthropic_request(text)
-            resp = requests.post(
+            resp = self.session.post(
                 self._chat_url(),
                 json=payload,
                 timeout=(5, 30),
