@@ -15,6 +15,7 @@ import ssl_setup  # noqa: E402  (intentionally first)
 from config import Config, load_config, save_config
 from llm_corrector import LLMCorrector
 from recorder import Recorder
+from smart_gate import correction_decision
 from text_inserter import TextInserter
 from tray import Tray
 from ui.dock import DockWindow
@@ -343,12 +344,18 @@ class App:
                     cancelled = True
                     return
 
-                if self.config.correction_enabled:
+                correction = correction_decision(
+                    raw_text,
+                    correction_enabled=self.config.correction_enabled,
+                    mode=getattr(self.config, "correction_mode", "smart"),
+                )
+
+                if correction.use_llm:
                     self.dock.mark_correcting(run.id)
 
                 corrected_text: str | None = None
                 llm_failed: Exception | None = None
-                if self.config.correction_enabled:
+                if correction.use_llm:
                     try:
                         corrected_text = self.llm.correct(raw_text)
                     except Exception as exc:  # noqa: BLE001
