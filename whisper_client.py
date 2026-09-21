@@ -21,6 +21,10 @@ class WhisperClient:
         # cloud endpoints and is harmless for local HTTP servers.
         self.session = requests.Session()
 
+    def close(self) -> None:
+        """Release pooled HTTP connections owned by this client."""
+        self.session.close()
+
     def _proxies(self) -> dict | None:
         """Return a proxies dict based on config.proxy.
         Empty string  → no proxy (bypass system proxy).
