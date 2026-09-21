@@ -17,6 +17,7 @@
   "restore_clipboard": true,
   "audio_filename": "recording.wav",
   "correction_enabled": true,
+  "correction_mode": "smart",
   "correction_url": "http://127.0.0.1",
   "correction_port": 11434,
   "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
