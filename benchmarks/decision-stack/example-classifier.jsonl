@@ -1,0 +1,4 @@
+{"id":"c-001","text":"Schreibe das genau so ohne Korrektur.","label":"raw","language":"de","critical":false}
+{"id":"c-002","text":"bitte mach nur komma und großschreibung sauber","label":"local_cleanup","language":"de","critical":false}
+{"id":"c-003","text":"Korrigiere den diktierten Satz leicht, aber ändere den Inhalt nicht.","label":"light_corrector","language":"de","critical":false}
+{"id":"c-004","text":"Formuliere den unstrukturierten Text vollständig lesbar aus.","label":"full_corrector","language":"de","critical":true}
