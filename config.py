@@ -209,6 +209,7 @@ DEFAULT_CONFIG = {
     "restore_clipboard": True,
     "audio_filename": "recording.wav",
     "correction_enabled": True,
+    "correction_mode": "smart",
     "correction_url": "http://127.0.0.1",
     "correction_port": 11434,
     "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
@@ -334,6 +335,9 @@ class Config:
         self.restore_clipboard = bool(data["restore_clipboard"])
         self.audio_filename = data["audio_filename"]
         self.correction_enabled = bool(data.get("correction_enabled", True))
+        self.correction_mode = str(data.get("correction_mode", "smart")).strip().lower()
+        if self.correction_mode not in {"fast", "smart", "polish"}:
+            self.correction_mode = "smart"
         self.correction_url = data.get("correction_url", "http://127.0.0.1")
         self.correction_port = data.get("correction_port", 11434)
         self.correction_token = get_token(
