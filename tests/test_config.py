@@ -70,6 +70,14 @@ class TestLoadConfig:
         data = load_config()
         assert data["my_custom_key"] == "hello"
 
+    def test_legacy_config_without_mode_preserves_polish_behavior(self, tmp_config_path):
+        tmp_config_path.write_text(
+            json.dumps({"language": "de", "correction_enabled": True}),
+            encoding="utf-8",
+        )
+        data = load_config()
+        assert data["correction_mode"] == "polish"
+
 
 class TestSaveConfig:
     def test_saves_json(self, tmp_config_path):
