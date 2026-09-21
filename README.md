@@ -9,6 +9,7 @@ Push-to-talk-Spracheingabe für Windows: Hotkey oder mittlere Maustaste halten, 
 - Transkription über lokalen OpenAI-/Whisper-kompatiblen HTTP-Endpunkt, Groq, OpenRouter oder OpenAI
 - optionale Transkriptions-Guidance für Diktatkommandos und Interpunktion
 - Vokabular-Ersetzungen aus `vocabulary.json`
+- Fast / Smart / Polish für die Korrektur: Smart nutzt zunächst ein lokales heuristisches Gate
 - optionale LLM-Korrektur über Ollama, LM Studio, Groq, OpenRouter, OpenAI, Anthropic oder Azure-OpenAI-kompatible Endpunkte
 - mehrere editierbare Korrektur-Prompts
 - API-Token im Windows Credential Manager statt in `config.json`
@@ -44,7 +45,9 @@ WhisperClient
         ↓
 VocabularyManager
         ↓
-LLMCorrector (optional)
+Fast / Smart heuristic / Polish
+        ↓
+LLMCorrector (nur falls erforderlich)
         ↓
 TextInserter
 ```
@@ -61,7 +64,8 @@ Jeder Diktat-Lauf besitzt eine eigene Run-ID, ein Cancel-Event und eine eigene t
 | `whisper_endpoint` | `transcribe` | Transkriptionspfad |
 | `language` | `de` | Zielsprache |
 | `transcription_guidance_enabled` | `false` | Diktat-Guidance/Postprocessing |
-| `correction_enabled` | `true` | LLM-Korrektur |
+| `correction_enabled` | `true` | Korrektur-Pipeline aktivieren |
+| `correction_mode` | `smart` | `fast`, `smart` oder `polish` |
 | `llm_provider` | `Ollama` | Korrekturanbieter |
 | `correction_url` | `http://127.0.0.1` | Basis-URL für lokalen LLM-Endpunkt |
 | `correction_port` | `11434` | lokaler LLM-Port |
