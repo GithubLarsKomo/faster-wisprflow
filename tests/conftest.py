@@ -62,6 +62,7 @@ def make_stub_config(**overrides):
         restore_clipboard=True,
         audio_filename="recording.wav",
         correction_enabled=True,
+        correction_mode="smart",
         correction_url="http://localhost",
         correction_port=11434,
         correction_token="",

@@ -17,6 +17,13 @@ class WhisperClient:
 
     def __init__(self, config: Config):
         self.config = config
+        # Reuse TCP/TLS connections across dictation runs. This matters for
+        # cloud endpoints and is harmless for local HTTP servers.
+        self.session = requests.Session()
+
+    def close(self) -> None:
+        """Release pooled HTTP connections owned by this client."""
+        self.session.close()
 
     def _proxies(self) -> dict | None:
         """Return a proxies dict based on config.proxy.
@@ -130,7 +137,7 @@ class WhisperClient:
             }
         payload = json.dumps(data)
         provider = get_provider("openrouter")
-        response = requests.post(
+        response = self.session.post(
             provider.transcription_url,
             headers=headers,
             data=payload,
@@ -151,7 +158,7 @@ class WhisperClient:
             if self._guidance_enabled():
                 data["prompt"] = self._initial_prompt()
             provider = get_provider("groq")
-            response = requests.post(
+            response = self.session.post(
                 provider.transcription_url,
                 headers=headers,
                 files={"file": (audio_path.name, f, "audio/wav")},
@@ -174,7 +181,7 @@ class WhisperClient:
                 prompt = self._initial_prompt()
                 data["prompt"] = prompt
             provider = get_provider("openai")
-            response = requests.post(
+            response = self.session.post(
                 provider.transcription_url,
                 headers=headers,
                 files={"file": (audio_path.name, f, "audio/wav")},
@@ -200,7 +207,7 @@ class WhisperClient:
                 prompt = self._initial_prompt()
                 data["prompt"] = prompt
                 data["initial_prompt"] = prompt
-            response = requests.post(
+            response = self.session.post(
                 f"{base}/{self.config.whisper_endpoint.lstrip('/')}",
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,

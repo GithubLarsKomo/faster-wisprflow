@@ -135,7 +135,7 @@ class TestCorrect:
         mock_resp.json.return_value = {
             "choices": [{"message": {"content": "Corrected text"}}]
         }
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             result = llm.correct("original text")
         assert result == "Corrected text"
 
@@ -162,7 +162,7 @@ class TestCorrect:
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"choices": [{"message": {"content": ""}}]}
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             assert llm.correct("original") == "original"
 
 
@@ -182,7 +182,7 @@ class TestProbe:
         mock_resp.json.return_value = {
             "choices": [{"message": {"content": "  Probed  "}}]
         }
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             assert llm.probe("test") == "Probed"
 
     def test_raises_on_http_error(self):
@@ -191,7 +191,7 @@ class TestProbe:
         mock_resp.ok = False
         mock_resp.status_code = 401
         mock_resp.text = "Unauthorized"
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             with pytest.raises(RuntimeError, match="HTTP 401"):
                 llm.probe("test")
 
@@ -200,7 +200,7 @@ class TestProbe:
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"error": {"message": "model not found"}}
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             with pytest.raises(ValueError, match="model not found"):
                 llm.probe("test")
 
@@ -209,7 +209,7 @@ class TestProbe:
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {"choices": []}
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             with pytest.raises(ValueError, match="Empty response"):
                 llm.probe("test")
 
@@ -218,7 +218,7 @@ class TestProbe:
         mock_resp = MagicMock()
         mock_resp.raise_for_status = MagicMock()
         mock_resp.json.return_value = {}
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             with pytest.raises(ValueError):
                 llm.probe("test")
 
@@ -253,7 +253,7 @@ class TestCorrectionIntegrity:
             ]
         }
 
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             assert llm.correct(raw) == raw
 
     def test_suspiciously_short_correction_falls_back_to_raw_text(self):
@@ -270,7 +270,7 @@ class TestCorrectionIntegrity:
             ]
         }
 
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             assert llm.correct(raw) == raw
 
     def test_anthropic_max_tokens_falls_back_to_raw_text(self):
@@ -288,7 +288,7 @@ class TestCorrectionIntegrity:
             "content": [{"type": "text", "text": "vollständiger"}],
         }
 
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             assert llm.correct(raw) == raw
 
     def test_probe_reports_truncation_explicitly(self):
@@ -304,6 +304,6 @@ class TestCorrectionIntegrity:
             ]
         }
 
-        with patch("llm_corrector.requests.post", return_value=mock_resp):
+        with patch.object(llm.session, "post", return_value=mock_resp):
             with pytest.raises(ValueError, match="truncated"):
                 llm.probe("test text")

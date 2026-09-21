@@ -84,6 +84,7 @@ def _make_app(tmp_path: Path, *, correction_enabled: bool = False) -> App:
     app = App.__new__(App)
     app.config = make_stub_config(
         correction_enabled=correction_enabled,
+        correction_mode="polish" if correction_enabled else "smart",
         ui_language="de",
     )
     app.recorder = _FakeRecorder(tmp_path)
@@ -277,3 +278,40 @@ def test_cancel_clears_pending_dock_gate_even_after_app_run_finished(tmp_path):
 
     app.dock.invalidate_active_run.assert_called_once_with()
     app.dock.set_idle.assert_called_once_with()
+
+
+def test_smart_mode_skips_llm_for_clean_short_text(tmp_path):
+    app = _make_app(tmp_path, correction_enabled=True)
+    app.config.correction_mode = "smart"
+    app.client = _ImmediateTranscriber(["Der Bericht ist vollständig geprüft."])
+
+    run = app._begin_run()
+    app.is_busy = True
+    thread = _start_worker(app, run)
+    thread.join(1)
+
+    assert not thread.is_alive()
+    app.llm.correct.assert_not_called()
+    app.inserter.insert_text.assert_called_once_with(
+        "Der Bericht ist vollständig geprüft."
+    )
+
+
+def test_smart_mode_uses_llm_for_uncertain_text(tmp_path):
+    app = _make_app(tmp_path, correction_enabled=True)
+    app.config.correction_mode = "smart"
+    app.client = _ImmediateTranscriber(
+        ["Der Bericht ist bereits vollständig geprüft und muss morgen versendet werden"]
+    )
+    app.llm.correct.return_value = "Der Bericht ist bereits vollständig geprüft und muss morgen versendet werden."
+
+    run = app._begin_run()
+    app.is_busy = True
+    thread = _start_worker(app, run)
+    thread.join(1)
+
+    assert not thread.is_alive()
+    app.llm.correct.assert_called_once()
+    app.inserter.insert_text.assert_called_once_with(
+        "Der Bericht ist bereits vollständig geprüft und muss morgen versendet werden."
+    )

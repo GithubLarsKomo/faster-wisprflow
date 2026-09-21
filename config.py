@@ -209,6 +209,7 @@ DEFAULT_CONFIG = {
     "restore_clipboard": True,
     "audio_filename": "recording.wav",
     "correction_enabled": True,
+    "correction_mode": "smart",
     "correction_url": "http://127.0.0.1",
     "correction_port": 11434,
     "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
@@ -228,11 +229,18 @@ def auto_elevate_if_needed(config):
 
 
 def load_config():
-    if not CONFIG_PATH.exists():
+    existed = CONFIG_PATH.exists()
+    if not existed:
         CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2), encoding="utf-8")
 
     with open(CONFIG_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
+
+    # Preserve historical behavior for existing installations. New installs
+    # get the DEFAULT_CONFIG Smart mode; legacy configs without an explicit
+    # mode remain "always correct" until the user selects Smart.
+    if existed and "correction_mode" not in data:
+        data["correction_mode"] = "polish"
 
     merged = DEFAULT_CONFIG.copy()
     merged.update(data)
@@ -334,6 +342,9 @@ class Config:
         self.restore_clipboard = bool(data["restore_clipboard"])
         self.audio_filename = data["audio_filename"]
         self.correction_enabled = bool(data.get("correction_enabled", True))
+        self.correction_mode = str(data.get("correction_mode", "smart")).strip().lower()
+        if self.correction_mode not in {"fast", "smart", "polish"}:
+            self.correction_mode = "smart"
         self.correction_url = data.get("correction_url", "http://127.0.0.1")
         self.correction_port = data.get("correction_port", 11434)
         self.correction_token = get_token(

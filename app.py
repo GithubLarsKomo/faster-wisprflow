@@ -15,6 +15,7 @@ import ssl_setup  # noqa: E402  (intentionally first)
 from config import Config, load_config, save_config
 from llm_corrector import LLMCorrector
 from recorder import Recorder
+from smart_gate import correction_decision
 from text_inserter import TextInserter
 from tray import Tray
 from ui.dock import DockWindow
@@ -35,6 +36,21 @@ class RunContext:
 
 
 class App:
+    _KEY_NAME_TO_VK = {
+        "ctrl": 0x11,
+        "left ctrl": 0xA2,
+        "right ctrl": 0xA3,
+        "alt": 0x12,
+        "shift": 0x10,
+        "left shift": 0xA0,
+        "right shift": 0xA1,
+        "linke windows": 0x5B,
+        "left windows": 0x5B,
+        "rechte windows": 0x5C,
+        "right windows": 0x5C,
+        "windows": 0x5B,
+    }
+
     def __init__(self):
         self.config = Config()
         self.dock = DockWindow(
@@ -57,6 +73,7 @@ class App:
         self.is_busy = False
         self.event_queue = queue.Queue()
         self.running = True
+        self._user32 = ctypes.windll.user32
 
         # A dictation run remains identifiable even while a cancelled worker is
         # still returning from a blocking HTTP request.  Shared flags are kept
@@ -77,14 +94,29 @@ class App:
         self.config.correction_enabled = enabled
         self.config.raw["correction_enabled"] = enabled
         save_config(self.config.raw)
+        old_llm = self.llm
         self.llm = LLMCorrector(self.config)
+        try:
+            old_llm.close()
+        except Exception:
+            pass
 
     def reload_config(self):
+        old_client = self.client
+        old_llm = self.llm
         self.config.reload()
         self.recorder = Recorder(self.config)
         self.client = WhisperClient(self.config)
         self.inserter = TextInserter(self.config)
         self.llm = LLMCorrector(self.config)
+        try:
+            old_client.close()
+        except Exception:
+            pass
+        try:
+            old_llm.close()
+        except Exception:
+            pass
 
         def _update_dock() -> None:
             self.dock.set_llm_enabled(self.config.correction_enabled)
@@ -140,39 +172,22 @@ class App:
             self.is_busy = False
             return True
 
+    def _get_user32(self):
+        user32 = getattr(self, "_user32", None)
+        if user32 is None:
+            user32 = ctypes.windll.user32
+            self._user32 = user32
+        return user32
+
     def hotkey_pressed(self):
-        """Check if the configured hotkey combination is pressed.
-
-        Uses ``GetAsyncKeyState`` directly instead of the ``keyboard`` library
-        because the library's low-level Windows hook (``SetWindowsHookEx``) is
-        unreliable in some environments — the internal ``_pressed_events`` dict
-        stays empty, so ``keyboard.is_pressed()`` always returns ``False``.
-        ``GetAsyncKeyState`` queries the physical key state directly and is
-        immune to hook-related issues.
-        """
-        _user32 = ctypes.windll.user32
-
-        _KEY_NAME_TO_VK = {
-            "ctrl": 0x11,  # VK_CONTROL
-            "left ctrl": 0xA2,  # VK_LCONTROL
-            "right ctrl": 0xA3,  # VK_RCONTROL
-            "alt": 0x12,  # VK_MENU
-            "shift": 0x10,  # VK_SHIFT
-            "left shift": 0xA0,  # VK_LSHIFT
-            "right shift": 0xA1,  # VK_RSHIFT
-            "linke windows": 0x5B,  # VK_LWIN
-            "left windows": 0x5B,  # VK_LWIN
-            "rechte windows": 0x5C,  # VK_RWIN
-            "right windows": 0x5C,  # VK_RWIN
-            "windows": 0x5B,  # VK_LWIN (fallback)
-        }
+        """Check if the configured hotkey combination is pressed."""
+        user32 = self._get_user32()
 
         def is_key_down(key_name: str) -> bool:
-            vk = _KEY_NAME_TO_VK.get(key_name.lower())
+            vk = self._KEY_NAME_TO_VK.get(key_name.lower())
             if vk is None:
                 return False
-            # 0x8000 = high-order bit (key is currently down)
-            return bool(_user32.GetAsyncKeyState(vk) & 0x8000)
+            return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
         try:
             return all(is_key_down(k) for k in self.config.hotkey_keys)
@@ -181,9 +196,9 @@ class App:
 
     def monitor_hotkey(self):
         was_pressed = False
+        user32 = self._get_user32()
         while self.running:
-            _user32 = ctypes.windll.user32
-            middle_mouse_down = bool(_user32.GetAsyncKeyState(0x04) & 0x8000)
+            middle_mouse_down = bool(user32.GetAsyncKeyState(0x04) & 0x8000)
             pressed = self.hotkey_pressed() or middle_mouse_down
 
             if pressed and not was_pressed:
@@ -193,7 +208,7 @@ class App:
                 self.event_queue.put("stop")
 
             was_pressed = pressed
-            time.sleep(0.03)
+            time.sleep(0.015)
 
     def process_events(self):
         try:
@@ -263,7 +278,7 @@ class App:
 
                 QTimer.singleShot(50, _poll_rms)
 
-            QTimer.singleShot(100, _start_popup)
+            QTimer.singleShot(0, _start_popup)
         except Exception:
             self.is_recording = False
             run.cancel_event.set()
@@ -343,12 +358,18 @@ class App:
                     cancelled = True
                     return
 
-                if self.config.correction_enabled:
+                correction = correction_decision(
+                    raw_text,
+                    correction_enabled=self.config.correction_enabled,
+                    mode=getattr(self.config, "correction_mode", "smart"),
+                )
+
+                if correction.use_llm:
                     self.dock.mark_correcting(run.id)
 
                 corrected_text: str | None = None
                 llm_failed: Exception | None = None
-                if self.config.correction_enabled:
+                if correction.use_llm:
                     try:
                         corrected_text = self.llm.correct(raw_text)
                     except Exception as exc:  # noqa: BLE001
@@ -439,15 +460,22 @@ class App:
             self.tray.stop()
         except Exception:
             pass
+        for client in (getattr(self, "client", None), getattr(self, "llm", None)):
+            try:
+                if client is not None:
+                    client.close()
+            except Exception:
+                pass
         QApplication.instance().quit()
 
     def run(self):
         threading.Thread(target=self.monitor_hotkey, daemon=True).start()
         threading.Thread(target=self.tray.run, daemon=True).start()
 
-        # poll event queue every 50 ms on the Qt main thread
+        # Keep push-to-talk start/stop responsive without introducing a native
+        # global hook dependency.
         self._event_timer = QTimer()
-        self._event_timer.setInterval(50)
+        self._event_timer.setInterval(20)
         self._event_timer.timeout.connect(self.process_events)
         self._event_timer.start()
 
