@@ -38,18 +38,24 @@ It does **not** attempt semantic classification.
 
 ### Stage-1 work
 
+Use an **obvious-wins-first** pass before instrumentation becomes a prerequisite.
+
 1. Fast / Smart / Polish modes.
 2. Heuristic Smart gate with unit tests.
-3. Per-run instrumentation:
+3. Reuse HTTP/TLS connections.
+4. Remove fixed delays that have no documented correctness purpose.
+5. Reduce avoidable input/UI polling latency without changing the Windows interaction contract.
+6. Remove repeated hot-path allocations/lookups where trivial.
+7. Keep run-identity cancellation guarantees.
+8. Then add per-run instrumentation for verification and the next optimization pass:
    - ASR final;
    - gate decision/reason;
    - LLM start/end;
    - insertion;
    - release-to-insert.
-4. Reuse HTTP connections where safe.
-5. Remove avoidable fixed UI delays after measurement.
-6. Keep run-identity cancellation guarantees.
-7. Collect a real dictation corpus and gate outcomes for later stages.
+9. Collect a real dictation corpus and gate outcomes for later stages.
+
+Measurement validates and prioritizes the second pass; it is not a prerequisite for the initial low-risk optimizations.
 
 ### Stage-1 exit gate
 
