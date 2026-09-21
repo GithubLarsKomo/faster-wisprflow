@@ -11,10 +11,10 @@ import re
 from dataclasses import dataclass
 
 _VALID_MODES = {"fast", "smart", "polish"}
-_WORD_RE = re.compile(r"[^\\W_]+(?:['’-][^\\W_]+)*", re.UNICODE)
-_TERMINAL_RE = re.compile(r'[.!?…][\\")\\]\\}»”’]*$')
+_WORD_RE = re.compile(r"[^\W_]+(?:['’-][^\W_]+)*", re.UNICODE)
+_TERMINAL_RE = re.compile(r'[.!?…][\")\]\}»”’]*$')
 _SELF_CORRECTION_RE = re.compile(
-    r"\\b(?:ähm?|ich\\s+meine|also\\s+nein|äh\\s+nein|nein\\s+doch)\\b",
+    r"\b(?:ähm?|ich\s+meine|also\s+nein|äh\s+nein|nein\s+doch)\b",
     re.IGNORECASE,
 )
 
