@@ -5,6 +5,16 @@ Status: **post-hardening / next development cycle**
 
 This roadmap starts only after the current hardening branch has passed its manual Windows smoke gate and is merged. It deliberately keeps ASR engine experiments out of the correctness PR.
 
+## Execution order
+
+Implementation follows the explicit three-stage plan in `docs/THREE_STAGE_OPTIMIZATION.md`:
+
+1. optimize FlüsterFee with the current stack and a heuristic Smart gate;
+2. optimize the incumbent XLM-R classifier and BGE reranker for low-resource shared use across FlüsterFee and the existing classification/hybrid-search applications;
+3. only then benchmark and establish newer System-One/JEV-style methods.
+
+A later stage must not block shipping a useful earlier stage.
+
 ## Goals
 
 Optimize four things together:
