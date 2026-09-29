@@ -158,6 +158,8 @@ Prompt-Vertrag, Kontextsemantik, Confidence-Policy, Datenschutzgrenzen und Testk
 
 Der Kontext besteht ausschließlich aus dem letzten erfolgreich eingefügten Diktat-Chunk desselben Vordergrundprozesses und verfällt standardmäßig nach 120 Sekunden. Er darf nur zur Disambiguierung dienen. Bei Cloud-LLM-Anbietern werden dieser Kontext und das konfigurierte Glossar zusammen mit dem aktuellen Diktat an den gewählten Anbieter übertragen.
 
+Der neue Factory-Prompt heißt `asr-v2.md`. Ein unveränderter alter Werksprompt wird automatisch auf v2 migriert; editierte Legacy-Prompts werden nicht überschrieben.
+
 ## Hardening
 
 Technische Spezifikation und Fahrplan: `SPEC.md` und `ROADMAP.md`.
