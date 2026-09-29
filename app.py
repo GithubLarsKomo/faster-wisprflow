@@ -16,7 +16,7 @@ from config import Config, load_config, save_config
 from llm_corrector import LLMCorrector
 from recorder import Recorder
 from smart_gate import correction_decision
-from text_inserter import TextInserter
+from text_inserter import TextInserter, _foreground_exe
 from tray import Tray
 from ui.dock import DockWindow
 from ui.settings_dialog import SettingsWindow
@@ -82,6 +82,9 @@ class App:
         self._run_lock = threading.Lock()
         self._run_counter = 0
         self._active_run: RunContext | None = None
+        # Previous successful dictation chunks, scoped by foreground process.
+        # This is correction-only context: it is never inserted or appended.
+        self._recent_context: dict[str, tuple[float, str]] = {}
 
         # Initialise dock badges from config
         self.dock.set_llm_enabled(self.config.correction_enabled)
@@ -178,6 +181,60 @@ class App:
             user32 = ctypes.windll.user32
             self._user32 = user32
         return user32
+
+    def _context_key(self) -> str:
+        """Return a coarse key for correction context scoping."""
+        return _foreground_exe() or "__unknown__"
+
+    def _get_recent_correction_context(self, key: str) -> str:
+        """Return the previous successful chunk when it is still fresh."""
+        if not bool(getattr(self.config, "correction_context_enabled", True)):
+            return ""
+        entry = self._recent_context.get(key)
+        if not entry:
+            return ""
+        created_at, text = entry
+        ttl = max(
+            0, int(getattr(self.config, "correction_context_ttl_seconds", 120))
+        )
+        if ttl and time.monotonic() - created_at > ttl:
+            self._recent_context.pop(key, None)
+            return ""
+        limit = max(
+            0, int(getattr(self.config, "correction_context_max_chars", 600))
+        )
+        if limit <= 0:
+            return ""
+        return text[-limit:]
+
+    def _remember_correction_context(self, key: str, text: str) -> None:
+        """Remember one successfully inserted chunk for the next dictation."""
+        if not text or not bool(
+            getattr(self.config, "correction_context_enabled", True)
+        ):
+            return
+        limit = max(
+            0, int(getattr(self.config, "correction_context_max_chars", 600))
+        )
+        if limit <= 0:
+            return
+        self._recent_context[key] = (time.monotonic(), text[-limit:])
+
+    def _correction_glossary(self) -> dict[str, str]:
+        """Return bounded user vocabulary for ASR disambiguation."""
+        if not bool(getattr(self.config, "correction_glossary_enabled", True)):
+            return {}
+        try:
+            glossary = dict(self.vocab.all())
+        except Exception:
+            return {}
+        limit = max(
+            0, int(getattr(self.config, "correction_glossary_max_items", 80))
+        )
+        if limit <= 0:
+            return {}
+        items = sorted(glossary.items(), key=lambda item: str(item[0]).casefold())
+        return dict(items[:limit])
 
     def hotkey_pressed(self):
         """Check if the configured hotkey combination is pressed."""
@@ -363,6 +420,9 @@ class App:
                     correction_enabled=self.config.correction_enabled,
                     mode=getattr(self.config, "correction_mode", "smart"),
                 )
+                context_key = self._context_key()
+                correction_context = self._get_recent_correction_context(context_key)
+                correction_glossary = self._correction_glossary()
 
                 if correction.use_llm:
                     self.dock.mark_correcting(run.id)
@@ -371,7 +431,11 @@ class App:
                 llm_failed: Exception | None = None
                 if correction.use_llm:
                     try:
-                        corrected_text = self.llm.correct(raw_text)
+                        corrected_text = self.llm.correct(
+                            raw_text,
+                            context=correction_context,
+                            glossary=correction_glossary,
+                        )
                     except Exception as exc:  # noqa: BLE001
                         llm_failed = exc
 
@@ -394,10 +458,14 @@ class App:
                 if not self._is_current_run(run):
                     cancelled = True
                     return
+                inserted = False
                 try:
                     self.inserter.insert_text(final_text)
+                    inserted = True
                 except Exception:
                     pass
+                if inserted:
+                    self._remember_correction_context(context_key, final_text)
 
                 if self._is_current_run(run):
                     self.dock.schedule_idle(run.id, 600)
