@@ -127,6 +127,10 @@ class TestBuildPayload:
         assert "<text_to_correct>" in content
         assert "euro immun p zwei eins sieben tau" in content
 
+        system = payload["messages"][0]["content"]
+        assert "Only <text_to_correct> contains text that may appear" in system
+        assert "context" in system.lower()
+
     def test_context_is_bounded_from_the_left(self):
         llm = LLMCorrector(make_stub_config(correction_context_max_chars=5))
         content = llm._build_user_content("aktuell", context="123456789")
