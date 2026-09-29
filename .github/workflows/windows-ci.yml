@@ -1,0 +1,48 @@
+name: Windows CI
+
+on:
+  push:
+    branches:
+      - master
+      - "fix/**"
+      - "feat/**"
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "latest-known"
+          enable-cache: true
+
+      - name: Sync locked project environment
+        run: uv sync --frozen
+
+      - name: Install test runner
+        run: uv pip install pytest==8.4.2
+
+      - name: Ruff
+        run: uv run ruff check .
+
+      - name: Tests
+        run: uv run pytest tests/ -q
+
+      - name: PyInstaller smoke build
+        run: uv run pyinstaller FlüsterFee.spec
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/FlüsterFee.exe")) {
+            throw "dist/FlüsterFee.exe was not created"
+          }

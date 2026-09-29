@@ -12,8 +12,8 @@ import pytest
 sys.modules.setdefault("sounddevice", MagicMock())
 sys.modules.setdefault("soundfile", MagicMock())
 
-from recorder import Recorder
-from tests.conftest import make_stub_config
+from recorder import Recorder  # noqa: E402
+from tests.conftest import make_stub_config  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -96,19 +96,59 @@ class TestStop:
             with pytest.raises(RuntimeError, match="no_audio"):
                 rec.stop()
 
-    def test_writes_wav_and_returns_path(self, tmp_path):
+    def test_writes_wav_and_returns_unique_temp_path(self, tmp_path):
         rec = make_recorder(sample_rate=16000, audio_filename="out.wav")
         rec.recording = False
-        # Add some fake audio frames
         rec.frames = [np.zeros((512, 1), dtype="float32")]
 
-        import soundfile as sf_mock
-
-        with patch("recorder.tempfile.gettempdir", return_value=str(tmp_path)):
+        with (
+            patch("recorder.tempfile.gettempdir", return_value=str(tmp_path)),
+            patch("recorder.sf.write") as mock_write,
+        ):
             path = rec.stop()
 
-        # soundfile is stubbed — verify sf.write was called with the right path
-        sf_mock.write.assert_called_once()
-        call_args = sf_mock.write.call_args[0]
-        assert call_args[0] == str(tmp_path / "out.wav")
-        assert path == tmp_path / "out.wav"
+        mock_write.assert_called_once()
+        call_args = mock_write.call_args[0]
+        assert call_args[0] == str(path)
+        assert path.parent == tmp_path
+        assert path.name.startswith("fluesterfee-")
+        assert path.suffix == ".wav"
+
+    def test_two_stops_use_distinct_paths(self, tmp_path):
+        rec = make_recorder(sample_rate=16000, audio_filename="recording.wav")
+        rec.recording = False
+        rec.frames = [np.zeros((128, 1), dtype="float32")]
+
+        with (
+            patch("recorder.tempfile.gettempdir", return_value=str(tmp_path)),
+            patch("recorder.sf.write"),
+        ):
+            first = rec.stop()
+            second = rec.stop()
+
+        assert first != second
+        assert first.parent == second.parent == tmp_path
+
+    def test_write_failure_removes_owned_temp_file(self, tmp_path):
+        rec = make_recorder(sample_rate=16000, audio_filename="recording.wav")
+        rec.recording = False
+        rec.frames = [np.zeros((128, 1), dtype="float32")]
+        created = []
+
+        real_mkstemp = __import__("tempfile").mkstemp
+
+        def tracking_mkstemp(*args, **kwargs):
+            fd, name = real_mkstemp(*args, **kwargs)
+            created.append(Path(name))
+            return fd, name
+
+        with (
+            patch("recorder.tempfile.gettempdir", return_value=str(tmp_path)),
+            patch("recorder.tempfile.mkstemp", side_effect=tracking_mkstemp),
+            patch("recorder.sf.write", side_effect=OSError("disk full")),
+        ):
+            with pytest.raises(OSError, match="disk full"):
+                rec.stop()
+
+        assert len(created) == 1
+        assert not created[0].exists()

@@ -5,20 +5,25 @@ import re
 import requests
 
 from config import _DEFAULT_TRANSCRIPTION_INITIAL_PROMPT, Config, _build_base_url
+from provider_registry import get_provider, normalize_provider
 
 
 class WhisperClient:
-    """Transcribes audio via one of three backends, auto-detected from ``whisper_url``:
+    """Transcribes audio through the provider contract registry.
 
-    - Custom (default): multipart POST to ``<whisper_url>:<port>/<whisper_endpoint>``
-    - Groq  (URL contains "groq.com"): multipart POST to
-      ``https://api.groq.com/openai/v1/audio/transcriptions``
-    - OpenRouter (URL contains "openrouter.ai"): JSON POST with base64 audio to
-      ``https://openrouter.ai/api/v1/audio/transcriptions``
+    Local/custom endpoints remain configurable; fixed public cloud endpoints are
+    defined once in ``provider_registry.py``.
     """
 
     def __init__(self, config: Config):
         self.config = config
+        # Reuse TCP/TLS connections across dictation runs. This matters for
+        # cloud endpoints and is harmless for local HTTP servers.
+        self.session = requests.Session()
+
+    def close(self) -> None:
+        """Release pooled HTTP connections owned by this client."""
+        self.session.close()
 
     def _proxies(self) -> dict | None:
         """Return a proxies dict based on config.proxy.
@@ -34,14 +39,16 @@ class WhisperClient:
         from pathlib import Path as _Path
 
         audio_path = _Path(audio_path)
-        provider = getattr(self.config, "whisper_provider", "local")
-        if provider == "Openrouter":
+        provider_id = normalize_provider(
+            getattr(self.config, "whisper_provider", "local")
+        )
+        if provider_id == "openrouter":
             text = self._transcribe_openrouter(audio_path)
             return self._apply_transcription_guidance(text)
-        if provider == "Groq":
+        if provider_id == "groq":
             text = self._transcribe_groq(audio_path)
             return self._apply_transcription_guidance(text)
-        if provider == "OpenAI":
+        if provider_id == "openai":
             text = self._transcribe_openai(audio_path)
             return self._apply_transcription_guidance(text)
         text = self._transcribe_custom(audio_path)
@@ -116,12 +123,22 @@ class WhisperClient:
             },
         }
         if self._guidance_enabled():
+            # OpenRouter exposes provider-specific transcription options under
+            # the provider block. A Groq-routed Whisper request accepts the
+            # vocabulary/style hint here; unsupported upstreams simply do not
+            # receive an invalid top-level prompt field.
             prompt = self._initial_prompt()
-            data["prompt"] = prompt
-            data["initial_prompt"] = prompt
+            data["provider"] = {
+                "options": {
+                    "groq": {
+                        "prompt": prompt,
+                    }
+                }
+            }
         payload = json.dumps(data)
-        response = requests.post(
-            "https://openrouter.ai/api/v1/audio/transcriptions",
+        provider = get_provider("openrouter")
+        response = self.session.post(
+            provider.transcription_url,
             headers=headers,
             data=payload,
             timeout=(5, 30),
@@ -139,11 +156,10 @@ class WhisperClient:
                 "response_format": "json",
             }
             if self._guidance_enabled():
-                prompt = self._initial_prompt()
-                data["prompt"] = prompt
-                data["initial_prompt"] = prompt
-            response = requests.post(
-                "https://api.groq.com/openai/v1/audio/transcriptions",
+                data["prompt"] = self._initial_prompt()
+            provider = get_provider("groq")
+            response = self.session.post(
+                provider.transcription_url,
                 headers=headers,
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,
@@ -164,8 +180,9 @@ class WhisperClient:
             if self._guidance_enabled():
                 prompt = self._initial_prompt()
                 data["prompt"] = prompt
-            response = requests.post(
-                "https://api.openai.com/v1/audio/transcriptions",
+            provider = get_provider("openai")
+            response = self.session.post(
+                provider.transcription_url,
                 headers=headers,
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,
@@ -190,7 +207,7 @@ class WhisperClient:
                 prompt = self._initial_prompt()
                 data["prompt"] = prompt
                 data["initial_prompt"] = prompt
-            response = requests.post(
+            response = self.session.post(
                 f"{base}/{self.config.whisper_endpoint.lstrip('/')}",
                 files={"file": (audio_path.name, f, "audio/wav")},
                 data=data,

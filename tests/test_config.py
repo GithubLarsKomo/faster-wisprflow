@@ -2,9 +2,6 @@
 
 import json
 from pathlib import Path
-from unittest.mock import patch
-
-import pytest
 
 from config import (
     DEFAULT_CONFIG,
@@ -73,6 +70,14 @@ class TestLoadConfig:
         data = load_config()
         assert data["my_custom_key"] == "hello"
 
+    def test_legacy_config_without_mode_preserves_polish_behavior(self, tmp_config_path):
+        tmp_config_path.write_text(
+            json.dumps({"language": "de", "correction_enabled": True}),
+            encoding="utf-8",
+        )
+        data = load_config()
+        assert data["correction_mode"] == "polish"
+
 
 class TestSaveConfig:
     def test_saves_json(self, tmp_config_path):
@@ -113,6 +118,23 @@ class TestConfigClass:
         cfg = Config()
         assert isinstance(cfg.restore_clipboard, bool)
 
+    def test_correction_mode_defaults_to_smart(self, tmp_config_path):
+        cfg = Config()
+        assert cfg.correction_mode == "smart"
+
+
+    def test_asr_v2_is_factory_corrector_prompt(self, tmp_config_path):
+        cfg = Config()
+        assert cfg.active_corrector_prompt == "asr-v2.md"
+
+    def test_invalid_correction_mode_falls_back_to_smart(self, tmp_config_path):
+        tmp_config_path.write_text(
+            json.dumps({**DEFAULT_CONFIG, "correction_mode": "mystery"}),
+            encoding="utf-8",
+        )
+        cfg = Config()
+        assert cfg.correction_mode == "smart"
+
     def test_reload_updates_attributes(self, tmp_config_path):
         cfg = Config()
         tmp_config_path.write_text(
@@ -132,3 +154,23 @@ def test_auto_elevate_is_noop():
     auto_elevate_if_needed({"auto_elevate": True})
     auto_elevate_if_needed({"auto_elevate": False})
     auto_elevate_if_needed({})
+
+
+# ---------------------------------------------------------------------------
+# repository config contract
+# ---------------------------------------------------------------------------
+
+
+def test_example_config_matches_defaults():
+    example_path = Path(__file__).resolve().parents[1] / "config.example.json"
+    example = json.loads(example_path.read_text(encoding="utf-8"))
+    assert example == DEFAULT_CONFIG
+
+
+def test_defaults_are_portable_and_do_not_advertise_noop_options():
+    assert DEFAULT_CONFIG["whisper_url"] == "http://127.0.0.1"
+    assert DEFAULT_CONFIG["correction_url"] == "http://127.0.0.1"
+    assert "auto_elevate" not in DEFAULT_CONFIG
+    assert "start_with_windows" not in DEFAULT_CONFIG
+    assert "whisper_token" not in DEFAULT_CONFIG
+    assert "correction_token" not in DEFAULT_CONFIG

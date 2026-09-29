@@ -1,9 +1,6 @@
 """Shared fixtures for all test modules."""
 
-import json
-import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -65,6 +62,12 @@ def make_stub_config(**overrides):
         restore_clipboard=True,
         audio_filename="recording.wav",
         correction_enabled=True,
+        correction_mode="smart",
+        correction_context_enabled=True,
+        correction_context_ttl_seconds=120,
+        correction_context_max_chars=600,
+        correction_glossary_enabled=True,
+        correction_glossary_max_items=80,
         correction_url="http://localhost",
         correction_port=11434,
         correction_token="",

@@ -8,3 +8,9 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Local runtime configuration / secrets
+config.json
+.env
+.env.*
+!config.example.json
