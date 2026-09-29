@@ -70,7 +70,7 @@ class _SequencedCorrector:
         self._counter = 0
         self._lock = threading.Lock()
 
-    def correct(self, _text: str) -> str:
+    def correct(self, _text: str, **_kwargs) -> str:
         with self._lock:
             idx = self._counter
             self._counter += 1
@@ -99,6 +99,8 @@ def _make_app(tmp_path: Path, *, correction_enabled: bool = False) -> App:
     app._run_lock = threading.Lock()
     app._run_counter = 0
     app._active_run = None
+    app._recent_context = {}
+    app._context_key = MagicMock(return_value="test.exe")
     return app
 
 
@@ -315,3 +317,43 @@ def test_smart_mode_uses_llm_for_uncertain_text(tmp_path):
     app.inserter.insert_text.assert_called_once_with(
         "Der Bericht ist bereits vollständig geprüft und muss morgen versendet werden."
     )
+
+
+def test_second_dictation_receives_previous_successful_chunk_as_context(tmp_path):
+    app = _make_app(tmp_path, correction_enabled=True)
+    app.config.correction_mode = "polish"
+    app.client = _ImmediateTranscriber(["erster diktierter text", "zweiter diktierter text"])
+    app.llm.correct.side_effect = ["Erster diktierter Text.", "Zweiter diktierter Text."]
+
+    run_a = app._begin_run()
+    app.is_busy = True
+    thread_a = _start_worker(app, run_a)
+    thread_a.join(1)
+
+    run_b = app._begin_run()
+    app.is_busy = True
+    thread_b = _start_worker(app, run_b)
+    thread_b.join(1)
+
+    assert not thread_a.is_alive()
+    assert not thread_b.is_alive()
+    first_call, second_call = app.llm.correct.call_args_list
+    assert first_call.kwargs["context"] == ""
+    assert second_call.kwargs["context"] == "Erster diktierter Text."
+
+
+def test_correction_glossary_is_forwarded_to_llm(tmp_path):
+    app = _make_app(tmp_path, correction_enabled=True)
+    app.config.correction_mode = "polish"
+    app.client = _ImmediateTranscriber(["euro immun test"])
+    app.vocab.all.return_value = {"euro immun": "EUROIMMUN"}
+    app.llm.correct.return_value = "EUROIMMUN Test."
+
+    run = app._begin_run()
+    app.is_busy = True
+    thread = _start_worker(app, run)
+    thread.join(1)
+
+    assert not thread.is_alive()
+    kwargs = app.llm.correct.call_args.kwargs
+    assert kwargs["glossary"] == {"euro immun": "EUROIMMUN"}
