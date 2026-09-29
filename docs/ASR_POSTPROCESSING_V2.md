@@ -94,7 +94,15 @@ Return only the corrected transcript.
 
 This is a functional approximation designed for FlüsterFee. It is not claimed to be an OpenAI-internal prompt.
 
-## 4. Runtime envelope
+## 4. Prompt materialization and migration
+
+The factory prompt is stored as `asr-v2.md` and is the default for new installations.
+
+Existing `default.md` prompts are not overwritten. If the selected legacy `default.md` is byte-for-byte equivalent to the untouched pre-v2 factory prompt, FlüsterFee automatically switches the active prompt to `asr-v2.md`. User-edited legacy prompts remain selected.
+
+Independently of the selected editable prompt, `LLMCorrector` appends a short invariant runtime data contract. This guarantees that `<context>` and `<glossary>` are hints only and that only `<text_to_correct>` may become output text.
+
+## 5. Runtime envelope
 
 `LLMCorrector` sends the current transcript as data, separated from the supporting hints:
 
@@ -112,7 +120,7 @@ current transcript
 
 The system prompt explicitly states that these blocks are data rather than instructions.
 
-## 5. Previous-context semantics
+## 6. Previous-context semantics
 
 The application remembers only the last successfully inserted dictation chunk for the current foreground process.
 
@@ -134,7 +142,7 @@ Important constraints:
 
 A future enhancement may replace process-level scoping with application/document-aware context where a reliable accessibility API is available.
 
-## 6. Glossary semantics
+## 7. Glossary semantics
 
 The existing `VocabularyManager` remains the first local correction layer.
 
@@ -149,7 +157,7 @@ Defaults:
 
 The glossary is advisory, not generative. A term must not be inserted merely because it exists in the glossary.
 
-## 7. Confidence rule
+## 8. Confidence rule
 
 The model does not return a numeric confidence score.
 
@@ -161,7 +169,7 @@ Instead, confidence is a behavioral policy:
 
 This avoids brittle pseudo-probabilities while still making uncertainty operational.
 
-## 8. Non-loss gates
+## 9. Non-loss gates
 
 Existing integrity checks remain authoritative after the model response:
 
@@ -173,7 +181,7 @@ Existing integrity checks remain authoritative after the model response:
 
 The LLM is therefore advisory. It never has authority to discard dictated content.
 
-## 9. Privacy boundary
+## 10. Privacy boundary
 
 When a local LLM such as Ollama is selected, all correction context remains local.
 
@@ -194,7 +202,7 @@ Users who do not want the additional context sent to the selected cloud provider
 
 The ASR v2 system prompt and non-loss behavior continue to work without those hints.
 
-## 10. Tests
+## 11. Tests
 
 Required automated coverage includes:
 
@@ -213,7 +221,7 @@ uv sync --frozen
 → PyInstaller smoke build
 ```
 
-## 11. Acceptance criteria
+## 12. Acceptance criteria
 
 ASR v2 is merge-ready when:
 
@@ -225,7 +233,7 @@ ASR v2 is merge-ready when:
 - tests and Windows CI pass;
 - README and configuration example match runtime behavior.
 
-## 12. Non-goals
+## 13. Non-goals
 
 This increment does not:
 
