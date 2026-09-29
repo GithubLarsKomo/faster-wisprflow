@@ -111,6 +111,33 @@ class TestBuildPayload:
         assert "de" in payload["messages"][1]["content"]
 
 
+    def test_payload_contains_separate_context_glossary_and_current_text(self):
+        llm = LLMCorrector(make_stub_config())
+        _, payload = llm._build_payload(
+            "euro immun p zwei eins sieben tau",
+            context="Wir sprechen über Alzheimer-Biomarker.",
+            glossary={"euro immun": "EUROIMMUN", "p217 tau": "p217-tau"},
+        )
+        content = payload["messages"][1]["content"]
+
+        assert "<context>" in content
+        assert "Alzheimer-Biomarker" in content
+        assert "<glossary>" in content
+        assert "euro immun => EUROIMMUN" in content
+        assert "<text_to_correct>" in content
+        assert "euro immun p zwei eins sieben tau" in content
+
+        system = payload["messages"][0]["content"]
+        assert "Only <text_to_correct> contains text that may appear" in system
+        assert "context" in system.lower()
+
+    def test_context_is_bounded_from_the_left(self):
+        llm = LLMCorrector(make_stub_config(correction_context_max_chars=5))
+        content = llm._build_user_content("aktuell", context="123456789")
+
+        assert "<context>\n56789\n</context>" in content
+
+
 # ---------------------------------------------------------------------------
 # correct()
 # ---------------------------------------------------------------------------
@@ -141,8 +168,9 @@ class TestCorrect:
 
     def test_raises_on_http_error(self):
         llm = self._make()
-        with patch(
-            "llm_corrector.requests.post",
+        with patch.object(
+            llm.session,
+            "post",
             side_effect=requests.HTTPError("500"),
         ):
             with pytest.raises(requests.HTTPError):
@@ -150,8 +178,9 @@ class TestCorrect:
 
     def test_raises_on_connection_error(self):
         llm = self._make()
-        with patch(
-            "llm_corrector.requests.post",
+        with patch.object(
+            llm.session,
+            "post",
             side_effect=requests.ConnectionError(),
         ):
             with pytest.raises(requests.ConnectionError):

@@ -122,6 +122,11 @@ class TestConfigClass:
         cfg = Config()
         assert cfg.correction_mode == "smart"
 
+
+    def test_asr_v2_is_factory_corrector_prompt(self, tmp_config_path):
+        cfg = Config()
+        assert cfg.active_corrector_prompt == "asr-v2.md"
+
     def test_invalid_correction_mode_falls_back_to_smart(self, tmp_config_path):
         tmp_config_path.write_text(
             json.dumps({**DEFAULT_CONFIG, "correction_mode": "mystery"}),
