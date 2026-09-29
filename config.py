@@ -1,3 +1,4 @@
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -16,7 +17,9 @@ VOCAB_PATH = CONFIG_PATH.parent / "vocabulary.json"
 PROMPT_PATH = CONFIG_PATH.parent / "system_prompt.txt"
 TRANSCRIPTION_PROMPT_PATH = CONFIG_PATH.parent / "transcription_initial_prompt.txt"
 CORRECTOR_PROMPTS_DIR = CONFIG_PATH.parent / "corrector_prompts"
-DEFAULT_CORRECTOR_PROMPT_FILE = "default.md"
+LEGACY_CORRECTOR_PROMPT_FILE = "default.md"
+DEFAULT_CORRECTOR_PROMPT_FILE = "asr-v2.md"
+_LEGACY_FACTORY_PROMPT_SHA256 = "629bd18950f3cc0b354d9d2c1f85ff0d09e9bca94d8c4d2d632596cf0354ccc7"
 
 _DEFAULT_SYSTEM_PROMPT = """You are an automatic speech recognition post-processing engine.
 
@@ -146,20 +149,36 @@ def _parse_corrector_prompt_file(path: Path) -> tuple[str, str]:
     return title, body
 
 
+def _is_legacy_factory_prompt(text: str) -> bool:
+    """Return True only for the untouched pre-v2 built-in factory prompt."""
+    digest = hashlib.sha256(text.strip().encode("utf-8")).hexdigest()
+    return digest == _LEGACY_FACTORY_PROMPT_SHA256
+
+
 def _ensure_corrector_prompts_dir() -> None:
-    """Create corrector_prompts dir and migrate system_prompt.txt on first run."""
+    """Materialize legacy and ASR-v2 prompt files without overwriting user edits."""
     CORRECTOR_PROMPTS_DIR.mkdir(parents=True, exist_ok=True)
-    default_file = CORRECTOR_PROMPTS_DIR / DEFAULT_CORRECTOR_PROMPT_FILE
-    if not default_file.exists():
+
+    legacy_file = CORRECTOR_PROMPTS_DIR / LEGACY_CORRECTOR_PROMPT_FILE
+    if not legacy_file.exists():
         if PROMPT_PATH.exists():
             try:
-                body = PROMPT_PATH.read_text(encoding="utf-8")
+                legacy_body = PROMPT_PATH.read_text(encoding="utf-8")
             except Exception:
-                body = _DEFAULT_SYSTEM_PROMPT
+                legacy_body = _DEFAULT_SYSTEM_PROMPT
         else:
-            body = _DEFAULT_SYSTEM_PROMPT
-        save_corrector_prompt(DEFAULT_CORRECTOR_PROMPT_FILE, "Werkseinstellung", body)
+            legacy_body = _DEFAULT_SYSTEM_PROMPT
+        save_corrector_prompt(
+            LEGACY_CORRECTOR_PROMPT_FILE, "Werkseinstellung", legacy_body
+        )
 
+    v2_file = CORRECTOR_PROMPTS_DIR / DEFAULT_CORRECTOR_PROMPT_FILE
+    if not v2_file.exists():
+        save_corrector_prompt(
+            DEFAULT_CORRECTOR_PROMPT_FILE,
+            "ASR v2 – Kontextuell konservativ",
+            _DEFAULT_SYSTEM_PROMPT,
+        )
 
 def list_corrector_prompts() -> list[dict]:
     """Return all corrector prompts as list of {filename, title, text} sorted by filename."""
@@ -231,7 +250,7 @@ DEFAULT_CONFIG = {
     "correction_port": 11434,
     "correction_model": "hf.co/unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_M",
     "llm_provider": "Ollama",
-    "active_corrector_prompt": "default.md",
+    "active_corrector_prompt": "asr-v2.md",
     "temperature": 0,
     "top_p": 1,
     "num_ctx": 1024,
@@ -394,6 +413,16 @@ class Config:
             "active_corrector_prompt", DEFAULT_CORRECTOR_PROMPT_FILE
         )
         _ensure_corrector_prompts_dir()
+
+        # Migrate only the untouched pre-v2 factory prompt. User-edited
+        # default.md files remain selected and are never overwritten.
+        if self.active_corrector_prompt == LEGACY_CORRECTOR_PROMPT_FILE:
+            _, legacy_prompt = load_corrector_prompt(LEGACY_CORRECTOR_PROMPT_FILE)
+            if _is_legacy_factory_prompt(legacy_prompt):
+                self.active_corrector_prompt = DEFAULT_CORRECTOR_PROMPT_FILE
+                data["active_corrector_prompt"] = self.active_corrector_prompt
+                save_config(data)
+
         _, prompt_text = load_corrector_prompt(self.active_corrector_prompt)
         if not prompt_text:
             _, prompt_text = load_corrector_prompt(DEFAULT_CORRECTOR_PROMPT_FILE)
