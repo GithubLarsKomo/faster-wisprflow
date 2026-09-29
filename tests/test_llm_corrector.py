@@ -168,8 +168,9 @@ class TestCorrect:
 
     def test_raises_on_http_error(self):
         llm = self._make()
-        with patch(
-            "llm_corrector.requests.post",
+        with patch.object(
+            llm.session,
+            "post",
             side_effect=requests.HTTPError("500"),
         ):
             with pytest.raises(requests.HTTPError):
@@ -177,8 +178,9 @@ class TestCorrect:
 
     def test_raises_on_connection_error(self):
         llm = self._make()
-        with patch(
-            "llm_corrector.requests.post",
+        with patch.object(
+            llm.session,
+            "post",
             side_effect=requests.ConnectionError(),
         ):
             with pytest.raises(requests.ConnectionError):
