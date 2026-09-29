@@ -991,6 +991,15 @@ class SettingsWindow:
         dlg.finished.connect(lambda _: setattr(self, "_llm_enabled_chk", None))
         llm_form.addRow("", enabled_chk)
 
+        mode_combo = QComboBox()
+        mode_combo.addItem("Fast", "fast")
+        mode_combo.addItem("Smart", "smart")
+        mode_combo.addItem("Polish", "polish")
+        current_mode = str(cfg.get("correction_mode", "smart")).strip().lower()
+        mode_index = mode_combo.findData(current_mode)
+        mode_combo.setCurrentIndex(mode_index if mode_index >= 0 else 1)
+        llm_form.addRow(tr.get("correction_mode", "Modus"), mode_combo)
+
         llm_providers = llm_provider_labels()
         prov_combo = QComboBox()
         prov_combo.addItems(llm_providers)
@@ -1474,6 +1483,7 @@ class SettingsWindow:
         def _save_llm() -> None:
             c = load_config()
             c["correction_enabled"] = enabled_chk.isChecked()
+            c["correction_mode"] = str(mode_combo.currentData() or "smart")
             c["llm_provider"] = prov_combo.currentText()
             c["correction_url"] = url_edit.text().strip()
             raw_port = port_edit.text().strip()

@@ -100,7 +100,7 @@ class TestTranscribeCustom:
 
         with (
             patch("builtins.open", m),
-            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+            patch.object(wc.session, "post", return_value=mock_resp) as mock_post,
         ):
             result = wc._transcribe_custom(audio_path)
 
@@ -126,7 +126,7 @@ class TestTranscribeCustom:
 
         with (
             patch("builtins.open", mock_open()),
-            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+            patch.object(wc.session, "post", return_value=mock_resp) as mock_post,
         ):
             wc._transcribe_custom(audio_path)
 
@@ -144,7 +144,7 @@ class TestTranscribeCustom:
 
         with (
             patch("builtins.open", mock_open()),
-            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+            patch.object(wc.session, "post", return_value=mock_resp) as mock_post,
         ):
             wc._transcribe_custom(audio_path)
 
@@ -162,7 +162,7 @@ class TestTranscribeCustom:
 
         with (
             patch("builtins.open", mock_open()),
-            patch("whisper_client.requests.post", return_value=mock_resp),
+            patch.object(wc.session, "post", return_value=mock_resp),
         ):
             result = wc._transcribe_custom(audio_path)
 
@@ -178,7 +178,7 @@ class TestTranscribeCustom:
 
         with (
             patch("builtins.open", mock_open()),
-            patch("whisper_client.requests.post", return_value=mock_resp),
+            patch.object(wc.session, "post", return_value=mock_resp),
         ):
             with pytest.raises(requests.HTTPError):
                 wc._transcribe_custom(audio_path)
@@ -194,7 +194,7 @@ class TestTranscribeCustom:
 
         with (
             patch("builtins.open", mock_open()),
-            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+            patch.object(wc.session, "post", return_value=mock_resp) as mock_post,
         ):
             wc._transcribe_custom(audio_path)
 
@@ -234,7 +234,7 @@ class TestTranscribeOpenrouter:
 
         with (
             patch("builtins.open", mock_open(read_data=b"\x00\x01\x02")),
-            patch("whisper_client.requests.post", return_value=mock_resp),
+            patch.object(wc.session, "post", return_value=mock_resp),
         ):
             result = wc._transcribe_openrouter(audio_path)
 
@@ -260,7 +260,7 @@ class TestTranscribeGroq:
 
         with (
             patch("builtins.open", mock_open(read_data=b"\x00")),
-            patch("whisper_client.requests.post", return_value=mock_resp),
+            patch.object(wc.session, "post", return_value=mock_resp),
         ):
             result = wc._transcribe_groq(audio_path)
 
@@ -291,7 +291,7 @@ class TestProviderRequestContracts:
 
         with (
             patch("builtins.open", mock_open(read_data=b"abc")),
-            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+            patch.object(wc.session, "post", return_value=mock_resp) as mock_post,
         ):
             wc._transcribe_openrouter(audio_path)
 
@@ -324,7 +324,7 @@ class TestProviderRequestContracts:
 
         with (
             patch("builtins.open", mock_open(read_data=b"abc")),
-            patch("whisper_client.requests.post", return_value=mock_resp) as mock_post,
+            patch.object(wc.session, "post", return_value=mock_resp) as mock_post,
         ):
             wc._transcribe_groq(audio_path)
 

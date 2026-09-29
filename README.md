@@ -9,6 +9,8 @@ Push-to-talk-Spracheingabe für Windows: Hotkey oder mittlere Maustaste halten, 
 - Transkription über lokalen OpenAI-/Whisper-kompatiblen HTTP-Endpunkt, Groq, OpenRouter oder OpenAI
 - optionale Transkriptions-Guidance für Diktatkommandos und Interpunktion
 - Vokabular-Ersetzungen aus `vocabulary.json`
+- ASR-Postprocessing v2 mit konservativer Kontextrekonstruktion, Confidence-Regel, Glossar und kurzem vorherigem Diktat-Kontext
+- Fast / Smart / Polish für die Korrektur: Smart nutzt zunächst ein lokales heuristisches Gate
 - optionale LLM-Korrektur über Ollama, LM Studio, Groq, OpenRouter, OpenAI, Anthropic oder Azure-OpenAI-kompatible Endpunkte
 - mehrere editierbare Korrektur-Prompts
 - API-Token im Windows Credential Manager statt in `config.json`
@@ -44,7 +46,9 @@ WhisperClient
         ↓
 VocabularyManager
         ↓
-LLMCorrector (optional)
+Fast / Smart heuristic / Polish
+        ↓
+LLMCorrector (nur falls erforderlich)
         ↓
 TextInserter
 ```
@@ -61,7 +65,13 @@ Jeder Diktat-Lauf besitzt eine eigene Run-ID, ein Cancel-Event und eine eigene t
 | `whisper_endpoint` | `transcribe` | Transkriptionspfad |
 | `language` | `de` | Zielsprache |
 | `transcription_guidance_enabled` | `false` | Diktat-Guidance/Postprocessing |
-| `correction_enabled` | `true` | LLM-Korrektur |
+| `correction_enabled` | `true` | Korrektur-Pipeline aktivieren |
+| `correction_mode` | `smart` | `fast`, `smart` oder `polish` |
+| `correction_context_enabled` | `true` | letzten erfolgreichen Diktat-Chunk als reine Disambiguierungshilfe mitsenden |
+| `correction_context_ttl_seconds` | `120` | maximale Lebensdauer dieses Kontextes |
+| `correction_context_max_chars` | `600` | maximale Kontextlänge |
+| `correction_glossary_enabled` | `true` | Vokabular als bevorzugte Schreibweisen an den Corrector übergeben |
+| `correction_glossary_max_items` | `80` | maximale Zahl übertragener Glossareinträge |
 | `llm_provider` | `Ollama` | Korrekturanbieter |
 | `correction_url` | `http://127.0.0.1` | Basis-URL für lokalen LLM-Endpunkt |
 | `correction_port` | `11434` | lokaler LLM-Port |
@@ -141,6 +151,14 @@ tests/
   test_provider_registry.py
   ...
 ```
+
+## ASR-Postprocessing v2
+
+Prompt-Vertrag, Kontextsemantik, Confidence-Policy, Datenschutzgrenzen und Testkriterien: `docs/ASR_POSTPROCESSING_V2.md`.
+
+Der Kontext besteht ausschließlich aus dem letzten erfolgreich eingefügten Diktat-Chunk desselben Vordergrundprozesses und verfällt standardmäßig nach 120 Sekunden. Er darf nur zur Disambiguierung dienen. Bei Cloud-LLM-Anbietern werden dieser Kontext und das konfigurierte Glossar zusammen mit dem aktuellen Diktat an den gewählten Anbieter übertragen.
+
+Der neue Factory-Prompt heißt `asr-v2.md`. Ein unveränderter alter Werksprompt wird automatisch auf v2 migriert; editierte Legacy-Prompts werden nicht überschrieben.
 
 ## Hardening
 
