@@ -728,7 +728,7 @@ class DockWindow(QWidget):
 
     def set_done(self) -> None:
         self._dot_timer.stop()
-        self._status_lbl.setText("✓ " + self._tr.get("dock_done", "Eingefügt"))
+        self._status_lbl.setText("✓ " + self._tr.get("dock_done", "Einfügen ausgelöst"))
         self._status_lbl.setStyleSheet(
             "QLabel { color: #6ee7b7; font-size: 13px; background: transparent; }"
         )
