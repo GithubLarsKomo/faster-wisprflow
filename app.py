@@ -517,7 +517,10 @@ class App:
 
                 if insertion_status == "dispatched":
                     if run.timings is not None:
-                        run.timings.mark("insert_dispatch")
+                        run.timings.mark(
+                            "insert_dispatch",
+                            at_ns=getattr(result, "dispatched_ns", None),
+                        )
                     self._remember_correction_context(context_key, final_text)
                     self.dock.mark_done(run.id)
                     self.dock.schedule_idle(run.id, 600)
