@@ -472,6 +472,10 @@ class TextInserter:
         if bound and not self.validate_target(expected_target):
             restore_if_ours()
             return InsertionResult("target_changed")
+        # Never paste a different clipboard payload after an external copy.
+        if bound and _get_clipboard_text() != text:
+            restore_if_ours()
+            return InsertionResult("clipboard_unavailable")
 
         # SendInput reports the number of INPUT records inserted. A successful
         # dispatch is not proof that an external target consumed the paste.
