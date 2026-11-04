@@ -3,6 +3,8 @@
 Date: 2026-09-20  
 Status: **post-hardening / next development cycle**
 
+**Smart Dictation vNext delivery plan (2026-11-04):** [docs/SMART_DICTATION_VNEXT_IMPLEMENTATION_PLAN.md](docs/SMART_DICTATION_VNEXT_IMPLEMENTATION_PLAN.md) operationalizes instrumentation/target-binding, app profiles/phrase vocabulary, optional streaming preview with batch fallback and the Windows E2E acceptance gate. This is a scoped execution plan for existing O0/O3/O7/O8 topics plus target/terminology safety; it does not replace this roadmap or duplicate O2/O4/O5/O6/O9.
+
 This roadmap starts only after the current hardening branch has passed its manual Windows smoke gate and is merged. It deliberately keeps ASR engine experiments out of the correctness PR.
 
 ## Execution order
