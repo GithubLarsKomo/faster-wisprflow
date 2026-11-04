@@ -1,10 +1,9 @@
-from target_window import TargetSnapshot
 """Tests for text_inserter.py — clipboard helpers and TextInserter."""
 
 import ctypes
 from unittest.mock import MagicMock, patch
 
-
+from target_window import TargetSnapshot
 from tests.conftest import make_stub_config
 from text_inserter import (
     TextInserter,
