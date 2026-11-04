@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 from app import App
+from metrics import LatencyCollector
+from text_inserter import InsertionResult
+from target_window import TargetSnapshot
 from tests.conftest import make_stub_config
 
 
@@ -93,7 +96,13 @@ def _make_app(tmp_path: Path, *, correction_enabled: bool = False) -> App:
     app.vocab.apply.side_effect = lambda text: text
     app.llm = MagicMock()
     app.inserter = MagicMock()
+    app.inserter.capture_target.return_value = TargetSnapshot(
+        hwnd=111, pid=222, process_created_100ns=333,
+        focus_hwnd=444, exe_name="notepad.exe",
+    )
+    app.inserter.insert_text.return_value = InsertionResult("dispatched")
     app.dock = MagicMock()
+    app.latency = LatencyCollector()
     app.is_recording = False
     app.is_busy = False
     app._run_lock = threading.Lock()
@@ -145,7 +154,9 @@ def test_stale_whisper_response_cannot_clear_or_paste_into_new_run(tmp_path):
     thread_b.join(1)
     assert not thread_b.is_alive()
 
-    app.inserter.insert_text.assert_called_once_with("new transcript")
+    app.inserter.insert_text.assert_called_once_with(
+        "new transcript", expected_target=app.inserter.capture_target.return_value
+    )
     assert app._get_active_run() is None
     assert app.is_busy is False
 
@@ -179,7 +190,9 @@ def test_stale_llm_response_cannot_clear_or_paste_into_new_run(tmp_path):
     thread_b.join(1)
     assert not thread_b.is_alive()
 
-    app.inserter.insert_text.assert_called_once_with("new corrected")
+    app.inserter.insert_text.assert_called_once_with(
+        "new corrected", expected_target=app.inserter.capture_target.return_value
+    )
     assert app._get_active_run() is None
     assert app.is_busy is False
 
@@ -211,7 +224,9 @@ def test_stale_transcription_error_is_silent_after_new_run_starts(tmp_path):
     client.release[1].set()
     thread_b.join(1)
 
-    app.inserter.insert_text.assert_called_once_with("new transcript")
+    app.inserter.insert_text.assert_called_once_with(
+        "new transcript", expected_target=app.inserter.capture_target.return_value
+    )
     app.dock.show_error_signal.emit.assert_not_called()
 
 
@@ -295,7 +310,7 @@ def test_smart_mode_skips_llm_for_clean_short_text(tmp_path):
     assert not thread.is_alive()
     app.llm.correct.assert_not_called()
     app.inserter.insert_text.assert_called_once_with(
-        "Der Bericht ist vollständig geprüft."
+        "Der Bericht ist vollständig geprüft.", expected_target=app.inserter.capture_target.return_value
     )
 
 
@@ -315,7 +330,7 @@ def test_smart_mode_uses_llm_for_uncertain_text(tmp_path):
     assert not thread.is_alive()
     app.llm.correct.assert_called_once()
     app.inserter.insert_text.assert_called_once_with(
-        "Der Bericht ist bereits vollständig geprüft und muss morgen versendet werden."
+        "Der Bericht ist bereits vollständig geprüft und muss morgen versendet werden.", expected_target=app.inserter.capture_target.return_value
     )
 
 
@@ -357,3 +372,52 @@ def test_correction_glossary_is_forwarded_to_llm(tmp_path):
     assert not thread.is_alive()
     kwargs = app.llm.correct.call_args.kwargs
     assert kwargs["glossary"] == {"euro immun": "EUROIMMUN"}
+
+
+def test_target_change_keeps_text_in_manual_review_and_no_context(tmp_path):
+    app = _make_app(tmp_path)
+    app.client = _ImmediateTranscriber(["nicht in das andere Fenster einfügen"])
+    app.inserter.insert_text.return_value = InsertionResult("target_changed")
+    run = app._begin_run()
+    app.is_busy = True
+    thread = _start_worker(app, run)
+    thread.join(1)
+    assert not thread.is_alive()
+    app.inserter.insert_text.assert_called_once_with(
+        "nicht in das andere Fenster einfügen",
+        expected_target=app.inserter.capture_target.return_value,
+    )
+    app.dock.show_pending_text_signal.emit.assert_called_once_with(
+        run.id, "nicht in das andere Fenster einfügen"
+    )
+    app.dock.mark_done.assert_not_called()
+    assert app._recent_context == {}
+    assert app.latency.records()[0]["outcome"] == "target_changed"
+    assert app.latency.records()[0]["duration_ms"]["release_to_insert_ms"] is None
+
+
+def test_missing_target_fails_closed_without_paste(tmp_path):
+    app = _make_app(tmp_path)
+    app.inserter.capture_target.return_value = None
+    app.client = _ImmediateTranscriber(["sicherer text"])
+    run = app._begin_run()
+    app.is_busy = True
+    thread = _start_worker(app, run)
+    thread.join(1)
+    assert not thread.is_alive()
+    app.inserter.insert_text.assert_not_called()
+    app.dock.show_pending_text_signal.emit.assert_called_once_with(
+        run.id, "sicherer text"
+    )
+
+
+def test_target_is_captured_before_audio_stream_starts(tmp_path):
+    app = _make_app(tmp_path)
+    events = []
+    snapshot = app.inserter.capture_target.return_value
+    app.inserter.capture_target.side_effect = lambda: events.append("capture") or snapshot
+    app.recorder.start = lambda: events.append("record")
+    with patch("app.QTimer.singleShot"):
+        app.start_recording()
+    assert events == ["capture", "record"]
+    assert app._get_active_run().target is snapshot
