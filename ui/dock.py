@@ -19,8 +19,12 @@ from PySide6.QtGui import QColor, QCursor, QFont, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
+    QDialog,
     QHBoxLayout,
     QLabel,
+    QPlainTextEdit,
+    QPushButton,
+    QVBoxLayout,
     QToolButton,
     QWidget,
 )
@@ -228,6 +232,7 @@ class DockWindow(QWidget):
     config_saved = Signal()
     show_error_signal = Signal(int, str)  # run_id, message
     show_info_signal = Signal(int, str, str)  # run_id, title, body
+    show_pending_text_signal = Signal(int, str)  # run_id, text for manual recovery
     llm_toggled = Signal(bool)  # emitted when the LLM badge is clicked
 
     # ── thread-safe dock-state helpers ────────────────────────────────────
@@ -276,6 +281,7 @@ class DockWindow(QWidget):
         self._animating: bool = False
         self._llm_active: bool = False
         self._run_gate = _RunUiGate()
+        self._pending_dialogs: set[QDialog] = set()
 
         # ── connect optional callbacks to signals ──────────────────────────
         if on_open_settings:
@@ -289,6 +295,7 @@ class DockWindow(QWidget):
 
         self.show_error_signal.connect(self._show_run_error)
         self.show_info_signal.connect(self._show_run_info)
+        self.show_pending_text_signal.connect(self._show_pending_text)
 
         # Wire the thread-safe state-request signals to run-aware slots. A
         # queued event emitted by an old worker can therefore never mutate the
@@ -821,6 +828,34 @@ class DockWindow(QWidget):
         from PySide6.QtWidgets import QMessageBox
 
         QMessageBox.information(None, title, body)
+
+    def _show_pending_text(self, run_id: int, text: str) -> None:
+        """Run-gated manual recovery. Never copy or paste automatically."""
+        if not self._accept_run(run_id):
+            return
+        dlg = QDialog(None)
+        dlg.setWindowTitle(self._tr["msg_target_changed_title"])
+        dlg.setMinimumSize(520, 260)
+        layout = QVBoxLayout(dlg)
+        notice = QLabel(self._tr["msg_target_changed_body"])
+        notice.setWordWrap(True)
+        layout.addWidget(notice)
+        editor = QPlainTextEdit(dlg)
+        editor.setPlainText(text)
+        layout.addWidget(editor)
+        buttons = QHBoxLayout()
+        copy_button = QPushButton(self._tr["msg_copy_text"])
+        close_button = QPushButton(self._tr["btn_close"])
+        copy_button.clicked.connect(
+            lambda: QApplication.clipboard().setText(editor.toPlainText())
+        )
+        close_button.clicked.connect(dlg.close)
+        buttons.addWidget(copy_button)
+        buttons.addWidget(close_button)
+        layout.addLayout(buttons)
+        self._pending_dialogs.add(dlg)
+        dlg.finished.connect(lambda _result: self._pending_dialogs.discard(dlg))
+        dlg.show()
 
     # ── painting ───────────────────────────────────────────────────────────
     def paintEvent(self, _event) -> None:  # noqa: N802
