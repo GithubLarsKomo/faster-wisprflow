@@ -72,8 +72,10 @@ class RunTimings:
 
     def finish(self, outcome: str) -> None:
         with self._lock:
+            if "completed" in self.marks:
+                return
             self.outcome = _public_label(outcome, _ALLOWED_OUTCOMES)
-            self.marks.setdefault("completed", time.perf_counter_ns())
+            self.marks["completed"] = time.perf_counter_ns()
 
     def to_record(self) -> dict:
         with self._lock:
