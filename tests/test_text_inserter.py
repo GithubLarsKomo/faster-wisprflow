@@ -412,7 +412,7 @@ class TestTargetBoundInsertion:
         ti = TextInserter(make_stub_config(restore_clipboard=False))
         with (
             patch.object(ti, "validate_target", return_value=True),
-            patch("text_inserter._get_clipboard_text", side_effect=["old", "other"]),
+            patch("text_inserter._get_clipboard_text", side_effect=["old", "other", "other"]),
             patch("text_inserter._set_clipboard_text", return_value=True),
             patch("text_inserter._send_ctrl_v") as paste,
             patch("text_inserter.time.sleep"),
