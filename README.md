@@ -78,6 +78,7 @@ Jeder Diktat-Lauf besitzt eine eigene Run-ID, ein Cancel-Event und eine eigene t
 | `max_tokens` | `220` | Mindestbudget; wächst bei längeren Diktaten dynamisch |
 | `num_ctx` | `1024` | Kontextbudget |
 | `restore_clipboard` | `true` | Text-Clipboard nach dem Einfügen wiederherstellen |
+| `latency_export_path` | `""` | Optionaler lokaler JSONL-Export beim regulären Beenden; ohne Pfad nur flüchtige RAM-Metriken |
 
 Die tatsächlich unterstützten Provider und deren feste öffentliche Endpunkte werden zentral in `provider_registry.py` definiert.
 
@@ -159,6 +160,14 @@ Prompt-Vertrag, Kontextsemantik, Confidence-Policy, Datenschutzgrenzen und Testk
 Der Kontext besteht ausschließlich aus dem letzten erfolgreich eingefügten Diktat-Chunk desselben Vordergrundprozesses und verfällt standardmäßig nach 120 Sekunden. Er darf nur zur Disambiguierung dienen. Bei Cloud-LLM-Anbietern werden dieser Kontext und das konfigurierte Glossar zusammen mit dem aktuellen Diktat an den gewählten Anbieter übertragen.
 
 Der neue Factory-Prompt heißt `asr-v2.md`. Ein unveränderter alter Werksprompt wird automatisch auf v2 migriert; editierte Legacy-Prompts werden nicht überschrieben.
+
+## vNext-01: Zielbindung und Latenzmessung
+
+Zu Beginn jedes Diktatlaufs wird eine Windows-Zielidentität (Fenster, Prozess, Prozessstartzeit und fokussiertes Steuerelement) festgehalten. Der Text wird nur an ein weiterhin dazu passendes Ziel gesendet. Falls das Ziel unbekannt oder verändert ist, zeigt FlüsterFee den Text zur manuellen Übernahme in einem lokalen Dialog; der Kopierknopf wird ausschließlich auf Nutzeraktion ausgeführt. Der SendInput-Erfolg bedeutet **Eingabedispatch, keine garantierte Textübernahme**. Manche Browser-Tab-/Dokumentwechsel sind anhand dieser Win32-Identität nicht erkennbar; deshalb bleibt der manuelle Windows-Test zwingend erforderlich.
+
+Alle Laufzeitphasen werden über monotone Zeitmarken ohne Audio-, Clipboard-, Prompt- oder Transkriptinhalt vermessen. Standardmäßig bleiben die Werte nur im RAM. Erst mit explizit konfiguriertem lokalem latency_export_path wird beim regulären Beenden eine aggregierbare JSONL-Datei erzeugt.
+
+Reproduzierbarer Windows-Smoke, Latenzreport und bekannte Grenzen: [docs/VNEXT01_WINDOWS_SMOKE.md](docs/VNEXT01_WINDOWS_SMOKE.md). Der bestehende Batch-ASR-, Smart-/Polish- und Cloud-Provider-Pfad bleibt erhalten.
 
 ## Hardening
 

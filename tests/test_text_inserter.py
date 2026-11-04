@@ -3,7 +3,7 @@
 import ctypes
 from unittest.mock import MagicMock, patch
 
-
+from target_window import TargetSnapshot
 from tests.conftest import make_stub_config
 from text_inserter import (
     TextInserter,
@@ -329,3 +329,94 @@ class TestCursorContextProbe:
         assert mock_shift_left.call_count == 3
         mock_copy.assert_called_once_with()
         mock_right.assert_called_once_with()
+
+
+# ---------------------------------------------------------------------------
+# vNext-01 focused-target insertion safety (no live Windows calls)
+# ---------------------------------------------------------------------------
+
+
+class TestTargetBoundInsertion:
+    @staticmethod
+    def _target():
+        return TargetSnapshot(101, 202, 303, 404, "notepad.exe")
+
+    def test_rejects_target_change_before_clipboard_mutation(self):
+        ti = TextInserter(make_stub_config(restore_clipboard=False))
+        with (
+            patch.object(ti, "validate_target", return_value=False),
+            patch("text_inserter._set_clipboard_text") as clip,
+            patch("text_inserter._send_ctrl_v") as paste,
+        ):
+            result = ti.insert_text("do not paste", expected_target=self._target())
+        assert result.status == "target_changed"
+        clip.assert_not_called()
+        paste.assert_not_called()
+
+    def test_focus_change_during_delay_prevents_paste_and_restores_clipboard(self):
+        ti = TextInserter(make_stub_config(restore_clipboard=False))
+        clipboard = ["old"]
+
+        def read_clip():
+            return clipboard[0]
+
+        def write_clip(s):
+            clipboard[0] = s
+            return True
+
+        with (
+            patch.object(
+                ti, "validate_target", side_effect=[True, True, True, False]
+            ),
+            patch("text_inserter._get_clipboard_text", side_effect=read_clip),
+            patch("text_inserter._set_clipboard_text", side_effect=write_clip),
+            patch("text_inserter._send_ctrl_v") as paste,
+            patch("text_inserter.time.sleep"),
+        ):
+            result = ti.insert_text("new", expected_target=self._target())
+        assert result.status == "target_changed"
+        assert clipboard == ["old"]
+        paste.assert_not_called()
+
+    def test_sendinput_dispatch_failure_is_not_reported_as_paste(self):
+        ti = TextInserter(make_stub_config(restore_clipboard=False))
+        clipboard = ["old"]
+        with (
+            patch.object(ti, "validate_target", return_value=True),
+            patch("text_inserter._get_clipboard_text", side_effect=lambda: clipboard[0]),
+            patch(
+                "text_inserter._set_clipboard_text",
+                side_effect=lambda s: clipboard.__setitem__(0, s) or True,
+            ),
+            patch("text_inserter._send_ctrl_v", return_value=False),
+            patch("text_inserter.time.sleep"),
+        ):
+            result = ti.insert_text("new", expected_target=self._target())
+        assert result.status == "dispatch_failed"
+        assert clipboard == ["old"]
+
+    def test_success_means_dispatched_not_verified_consumed(self):
+        ti = TextInserter(make_stub_config(restore_clipboard=False))
+        with (
+            patch.object(ti, "validate_target", return_value=True),
+            patch("text_inserter._get_clipboard_text", side_effect=["old", "new"]),
+            patch("text_inserter._set_clipboard_text", return_value=True),
+            patch("text_inserter._send_ctrl_v", return_value=True),
+            patch("text_inserter.time.sleep"),
+        ):
+            result = ti.insert_text("new", expected_target=self._target())
+        assert result.dispatched
+
+
+    def test_external_clipboard_replacement_prevents_wrong_paste(self):
+        ti = TextInserter(make_stub_config(restore_clipboard=False))
+        with (
+            patch.object(ti, "validate_target", return_value=True),
+            patch("text_inserter._get_clipboard_text", side_effect=["old", "other", "other"]),
+            patch("text_inserter._set_clipboard_text", return_value=True),
+            patch("text_inserter._send_ctrl_v") as paste,
+            patch("text_inserter.time.sleep"),
+        ):
+            result = ti.insert_text("new", expected_target=self._target())
+        assert result.status == "clipboard_unavailable"
+        paste.assert_not_called()

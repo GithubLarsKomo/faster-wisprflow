@@ -23,8 +23,24 @@ All Win32 calls are thread-safe (clipboard is mutex-guarded by the OS).
 
 import ctypes
 import ctypes.wintypes as wt
+from dataclasses import dataclass
 import re
 import time
+
+from target_window import TargetSnapshot, capture_target, validate_target
+
+
+@dataclass(frozen=True)
+class InsertionResult:
+    """Result describes dispatch, not confirmation that the target consumed a paste."""
+
+    status: str
+    dispatched_ns: int | None = None
+
+    @property
+    def dispatched(self) -> bool:
+        return self.status == "dispatched"
+
 
 # ── Win32 types / constants ──────────────────────────────────────────────────
 CF_UNICODETEXT = 13
@@ -185,7 +201,7 @@ def _send_ctrl_v() -> None:
             ),
         ),
     )
-    _u32.SendInput(4, inputs, ctypes.sizeof(_INPUT))
+    return _u32.SendInput(4, inputs, ctypes.sizeof(_INPUT)) == 4
 
 
 def _send_ctrl_c() -> None:
@@ -391,60 +407,85 @@ class TextInserter:
             return self._capitalize_first_latin_word(text)
         return text
 
-    def insert_text(self, text: str) -> None:
+    @staticmethod
+    def capture_target() -> TargetSnapshot | None:
+        return capture_target()
+
+    @staticmethod
+    def validate_target(expected: TargetSnapshot | None) -> bool:
+        return validate_target(expected)
+
+    def insert_text(
+        self, text: str, *, expected_target: TargetSnapshot | None = None
+    ) -> InsertionResult:
+        """Dispatch one paste only when its captured target still owns focus.
+
+        expected_target=None remains usable for legacy callers and isolated
+        insertion tests. App dictation runs always pass a valid snapshot and
+        explicitly refuse insertion if capture failed.
+        """
         if not text:
-            return
+            return InsertionResult("empty")
 
+        bound = expected_target is not None
+        if bound and not self.validate_target(expected_target):
+            return InsertionResult("target_changed")
+
+        # The optional caret probe may itself change foreground/focus.
         text = self._apply_cursor_context_case(text)
+        if bound and not self.validate_target(expected_target):
+            return InsertionResult("target_changed")
 
-        # 1. Save existing clipboard if requested
-        old_text: str | None = None
-        if self.config.restore_clipboard:
-            old_text = _get_clipboard_text()
+        # Capture the original clipboard even when normal restore is disabled:
+        # on failure/target change it must not become an accidental paste.
+        old_text = (
+            _get_clipboard_text()
+            if self.config.restore_clipboard or bound
+            else None
+        )
+        is_word = (
+            expected_target.exe_name == "winword.exe"
+            if bound else _foreground_exe() == "winword.exe"
+        )
 
-        # 2. Is Word in the foreground?
-        is_word = _foreground_exe() == "winword.exe"
+        if bound and not self.validate_target(expected_target):
+            return InsertionResult("target_changed")
 
-        # 3. Write our text to clipboard. Retry with a longer total budget —
-        # the previous 8 × 0.04s backoff was too short when the foreground
-        # app (Word, a heavy IDE, an RDP window) is still settling from the
-        # hotkey release and briefly holds the clipboard. If we give up
-        # silently, Ctrl+V then pastes the *old* clipboard contents — the
-        # user sees "the prior clipboard was pasted" which is exactly the
-        # bug report.
         if not _set_clipboard_text(text):
-            # Fallback: pyperclip (shouldn't normally be needed)
+            # Preserve the prior fallback, but never issue Ctrl+V if both
+            # clipboard writers fail.
             try:
                 import pyperclip
 
                 pyperclip.copy(text)
-                # Give the clipboard manager a moment to actually commit the
-                # write before we post the Ctrl+V keystroke.
                 time.sleep(0.08)
             except Exception:
-                return
+                return InsertionResult("clipboard_unavailable")
 
-        # 4. Give the OS clipboard subsystem a chance to publish the new
-        # data across processes before we post Ctrl+V. 60ms was too short
-        # for slow targets (browser inputs, RDP, terminal apps).
+        def restore_if_ours() -> None:
+            if old_text is not None and _get_clipboard_text() == text:
+                _set_clipboard_text(old_text)
+
+        # Let the target see the clipboard; always revalidate immediately
+        # before SendInput because focus may have changed during this wait.
         time.sleep(0.12)
+        if bound and not self.validate_target(expected_target):
+            restore_if_ours()
+            return InsertionResult("target_changed")
+        # Never paste a different clipboard payload after an external copy.
+        if bound and _get_clipboard_text() != text:
+            restore_if_ours()
+            return InsertionResult("clipboard_unavailable")
 
-        # 5. Send Ctrl+V
-        _send_ctrl_v()
+        # SendInput reports the number of INPUT records inserted. A successful
+        # dispatch is not proof that an external target consumed the paste.
+        if _send_ctrl_v() is False:
+            restore_if_ours()
+            return InsertionResult("dispatch_failed")
+        dispatched_ns = time.perf_counter_ns()
 
-        # 6. Wait for the paste to be processed. Word needs an extra delay
-        # because of its protected-paste path; other targets need at least
-        # ~250ms to consume the clipboard reliably.
         delay = 0.25 + (self.WORD_EXTRA_DELAY if is_word else 0.0)
         time.sleep(delay)
-
-        # 7. Restore clipboard — only if it isn't already what we'd restore
-        # to (avoids an unnecessary write that can race with the target app).
-        if self.config.restore_clipboard and old_text is not None:
-            # Don't blindly overwrite — if the target app already read the
-            # clipboard, leaving the new text in place is harmless. We only
-            # restore when the current clipboard is still our text (i.e.
-            # the user hasn't copied something else in the meantime).
-            current = _get_clipboard_text()
-            if current == text:
-                _set_clipboard_text(old_text)
+        if self.config.restore_clipboard:
+            restore_if_ours()
+        return InsertionResult("dispatched", dispatched_ns=dispatched_ns)

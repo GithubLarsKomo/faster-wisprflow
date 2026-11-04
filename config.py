@@ -239,6 +239,7 @@ DEFAULT_CONFIG = {
     "hotkey_keys": ["ctrl", "linke windows"],
     "restore_clipboard": True,
     "audio_filename": "recording.wav",
+    "latency_export_path": "",  # empty = no persistent recording/telemetry
     "correction_enabled": True,
     "correction_mode": "smart",
     "correction_context_enabled": True,

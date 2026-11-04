@@ -14,9 +14,11 @@ from PySide6.QtWidgets import QApplication, QMessageBox
 import ssl_setup  # noqa: E402  (intentionally first)
 from config import Config, load_config, save_config
 from llm_corrector import LLMCorrector
+from metrics import LatencyCollector, RunTimings
 from recorder import Recorder
 from smart_gate import correction_decision
-from text_inserter import TextInserter, _foreground_exe
+from text_inserter import TextInserter
+from target_window import TargetSnapshot
 from tray import Tray
 from ui.dock import DockWindow
 from ui.settings_dialog import SettingsWindow
@@ -33,6 +35,8 @@ class RunContext:
     cancel_event: threading.Event = field(default_factory=threading.Event)
     started_at: float = field(default_factory=time.monotonic)
     audio_path: Path | None = None
+    target: TargetSnapshot | None = None
+    timings: RunTimings | None = None
 
 
 class App:
@@ -82,6 +86,7 @@ class App:
         self._run_lock = threading.Lock()
         self._run_counter = 0
         self._active_run: RunContext | None = None
+        self.latency = LatencyCollector()
         # Previous successful dictation chunks, scoped by foreground process.
         # This is correction-only context: it is never inserted or appended.
         self._recent_context: dict[str, tuple[float, str]] = {}
@@ -132,15 +137,22 @@ class App:
         QTimer.singleShot(0, _update_dock)
 
     def _begin_run(self) -> RunContext:
-        """Create and activate a new run, invalidating any stale predecessor."""
+        """Freeze the focused target before the dock can alter focus."""
+        try:
+            snapshot = self.inserter.capture_target()
+        except Exception:
+            snapshot = None
         with self._run_lock:
             if self._active_run is not None:
                 self._active_run.cancel_event.set()
             self._run_counter += 1
-            run = RunContext(id=self._run_counter)
+            run = RunContext(id=self._run_counter, target=snapshot)
+            run.timings = RunTimings(
+                run_id=run.id,
+                provider=str(getattr(self.config, "whisper_provider", "local")).lower(),
+                mode=str(getattr(self.config, "correction_mode", "smart")).lower(),
+            )
             self._active_run = run
-        # The dock keeps a separate GUI-thread gate because queued Qt signals
-        # may arrive after the worker-side run check that emitted them.
         self.dock.activate_run(run.id)
         return run
 
@@ -182,13 +194,13 @@ class App:
             self._user32 = user32
         return user32
 
-    def _context_key(self) -> str:
-        """Return a coarse key for correction context scoping."""
-        return _foreground_exe() or "__unknown__"
+    def _context_key(self, target: TargetSnapshot | None = None) -> str:
+        """Use the *captured* process, never the later foreground process."""
+        return target.context_key if target is not None else ""
 
     def _get_recent_correction_context(self, key: str) -> str:
         """Return the previous successful chunk when it is still fresh."""
-        if not bool(getattr(self.config, "correction_context_enabled", True)):
+        if not key or not bool(getattr(self.config, "correction_context_enabled", True)):
             return ""
         entry = self._recent_context.get(key)
         if not entry:
@@ -209,7 +221,7 @@ class App:
 
     def _remember_correction_context(self, key: str, text: str) -> None:
         """Remember one successfully inserted chunk for the next dictation."""
-        if not text or not bool(
+        if not key or not text or not bool(
             getattr(self.config, "correction_context_enabled", True)
         ):
             return
@@ -289,6 +301,14 @@ class App:
         except queue.Empty:
             pass
 
+    def _publish_metrics(self, run: RunContext, outcome: str) -> None:
+        """Record only bounded, sanitized monotonic durations, never user text."""
+        if run.timings is not None:
+            run.timings.finish(outcome)
+            collector = getattr(self, "latency", None)
+            if collector is not None:
+                collector.add(run.timings)
+
     def cancel_current_run(self) -> None:
         """Invalidate the active run and reset the dock immediately.
 
@@ -296,7 +316,9 @@ class App:
         workers.  Their RunContext stays cancelled, so stale responses cannot
         insert text or mutate the state of a newer run.
         """
-        self._cancel_active_run()
+        cancelled_run = self._cancel_active_run()
+        if cancelled_run is not None:
+            self._publish_metrics(cancelled_run, "cancelled")
 
         # If we're still recording, stop the sounddevice stream first.
         if self.is_recording:
@@ -354,6 +376,8 @@ class App:
 
         self.is_recording = False
         self.is_busy = True
+        if run.timings is not None:
+            run.timings.mark("record_stop")
 
         self.dock.set_rms(0.0)
         self.dock.set_processing()
@@ -382,12 +406,14 @@ class App:
                     self.dock.mark_idle(run.id)
                 except Exception:
                     pass
+            self._publish_metrics(run, "error")
             self._finish_run_if_current(run)
 
     def transcribe_and_insert(self, run: RunContext) -> None:
         audio_path = None
         dock_resolved = False
         cancelled = False
+        outcome = "error"
         try:
             if not self._is_current_run(run):
                 cancelled = True
@@ -395,12 +421,20 @@ class App:
 
             audio_path = self.recorder.stop()
             run.audio_path = audio_path
+            if run.timings is not None:
+                run.timings.mark("audio_ready")
 
             if not self._is_current_run(run):
                 cancelled = True
                 return
 
-            text = self.client.transcribe(audio_path)
+            if run.timings is not None:
+                run.timings.mark("asr_start")
+            try:
+                text = self.client.transcribe(audio_path)
+            finally:
+                if run.timings is not None:
+                    run.timings.mark("asr_final")
 
             # A blocked request may have returned long after cancellation or
             # after a newer run became active. Revalidate before every side
@@ -415,12 +449,16 @@ class App:
                     cancelled = True
                     return
 
+                if run.timings is not None:
+                    run.timings.mark("gate_start")
                 correction = correction_decision(
                     raw_text,
                     correction_enabled=self.config.correction_enabled,
                     mode=getattr(self.config, "correction_mode", "smart"),
                 )
-                context_key = self._context_key()
+                if run.timings is not None:
+                    run.timings.mark("gate_end")
+                context_key = self._context_key(run.target)
                 correction_context = self._get_recent_correction_context(context_key)
                 correction_glossary = self._correction_glossary()
 
@@ -430,6 +468,8 @@ class App:
                 corrected_text: str | None = None
                 llm_failed: Exception | None = None
                 if correction.use_llm:
+                    if run.timings is not None:
+                        run.timings.mark("llm_start")
                     try:
                         corrected_text = self.llm.correct(
                             raw_text,
@@ -438,6 +478,9 @@ class App:
                         )
                     except Exception as exc:  # noqa: BLE001
                         llm_failed = exc
+                    finally:
+                        if run.timings is not None:
+                            run.timings.mark("llm_end")
 
                 if not self._is_current_run(run):
                     cancelled = True
@@ -447,36 +490,59 @@ class App:
                     corrected_text if (corrected_text and not llm_failed) else raw_text
                 )
 
-                # Revalidate immediately before the two user-visible side
-                # effects. Once the paste has begun it cannot be retracted, but
-                # a cancelled/stale worker can never begin a new paste.
+                # The target is immutable for this run. A missing identity is
+                # *not* a reason to paste into whichever app has focus now.
                 if not self._is_current_run(run):
                     cancelled = True
                     return
-                self.dock.mark_done(run.id)
-
-                if not self._is_current_run(run):
-                    cancelled = True
-                    return
-                inserted = False
+                if run.timings is not None:
+                    run.timings.mark("insert_start")
                 try:
-                    self.inserter.insert_text(final_text)
-                    inserted = True
-                except Exception:
-                    pass
-                if inserted:
-                    self._remember_correction_context(context_key, final_text)
-
-                if self._is_current_run(run):
-                    self.dock.schedule_idle(run.id, 600)
-                    dock_resolved = True
-                    if llm_failed is not None:
-                        lang = self.config.ui_language
-                        self.dock.show_info_signal.emit(
-                            run.id,
-                            t("msg_result_title", lang),
-                            t("msg_llm_fallback", lang),
+                    if run.target is None:
+                        insertion_status = "target_changed"
+                    else:
+                        result = self.inserter.insert_text(
+                            final_text, expected_target=run.target
                         )
+                        insertion_status = getattr(result, "status", "insertion_failed")
+                except Exception:
+                    insertion_status = "insertion_failed"
+                finally:
+                    if run.timings is not None:
+                        run.timings.mark("insert_end")
+
+                if not self._is_current_run(run):
+                    cancelled = True
+                    return
+
+                if insertion_status == "dispatched":
+                    if run.timings is not None:
+                        run.timings.mark(
+                            "insert_dispatch",
+                            at_ns=getattr(result, "dispatched_ns", None),
+                        )
+                    self._remember_correction_context(context_key, final_text)
+                    self.dock.mark_done(run.id)
+                    self.dock.schedule_idle(run.id, 600)
+                    outcome = "dispatched"
+                else:
+                    # Keep user text in a run-gated local review dialog.
+                    # Copying is an explicit user action, never automatic.
+                    self.dock.show_pending_text_signal.emit(run.id, final_text)
+                    self.dock.mark_idle(run.id)
+                    outcome = (
+                        "target_changed" if insertion_status == "target_changed"
+                        else "insertion_failed"
+                    )
+                dock_resolved = True
+
+                if insertion_status == "dispatched" and llm_failed is not None:
+                    lang = self.config.ui_language
+                    self.dock.show_info_signal.emit(
+                        run.id,
+                        t("msg_result_title", lang),
+                        t("msg_llm_fallback", lang),
+                    )
             else:
                 if not self._is_current_run(run):
                     cancelled = True
@@ -489,6 +555,7 @@ class App:
                 )
                 self.dock.mark_idle(run.id)
                 dock_resolved = True
+                outcome = "no_speech"
 
         except Exception as e:
             if not self._is_current_run(run):
@@ -497,6 +564,7 @@ class App:
             if str(e) == "no_audio":
                 self.dock.mark_idle(run.id)
                 dock_resolved = True
+                outcome = "no_audio"
             else:
                 lang = self.config.ui_language
                 err_msg = f'{t("msg_error", lang)}: {e}'
@@ -512,6 +580,7 @@ class App:
 
             # A stale worker must never clear a newer run's busy state. Only
             # the active owner can complete the shared lifecycle.
+            self._publish_metrics(run, "cancelled" if cancelled else outcome)
             finished_current = self._finish_run_if_current(run)
             if finished_current and not dock_resolved and not cancelled:
                 self.dock.mark_idle(run.id)
@@ -524,6 +593,20 @@ class App:
 
     def _quit_mainthread(self):
         self.running = False
+        # Export only when the user explicitly configured a local destination.
+        export_path = str(getattr(self.config, "raw", {}).get(
+            "latency_export_path", ""
+        ) or "").strip()
+        if export_path and hasattr(self, "latency"):
+            from config import CONFIG_PATH
+
+            output = Path(export_path).expanduser()
+            if not output.is_absolute():
+                output = CONFIG_PATH.parent / output
+            try:
+                self.latency.export_jsonl(output)
+            except OSError:
+                pass  # Never block shutdown; local export is best effort.
         try:
             self.tray.stop()
         except Exception:

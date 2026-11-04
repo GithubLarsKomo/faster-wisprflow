@@ -16,6 +16,7 @@
   "hotkey_keys": ["ctrl", "linke windows"],
   "restore_clipboard": true,
   "audio_filename": "recording.wav",
+  "latency_export_path": "",
   "correction_enabled": true,
   "correction_mode": "smart",
   "correction_context_enabled": true,
