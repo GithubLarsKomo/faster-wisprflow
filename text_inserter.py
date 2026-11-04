@@ -35,6 +35,7 @@ class InsertionResult:
     """Result describes dispatch, not confirmation that the target consumed a paste."""
 
     status: str
+    dispatched_ns: int | None = None
 
     @property
     def dispatched(self) -> bool:
@@ -477,9 +478,10 @@ class TextInserter:
         if _send_ctrl_v() is False:
             restore_if_ours()
             return InsertionResult("dispatch_failed")
+        dispatched_ns = time.perf_counter_ns()
 
         delay = 0.25 + (self.WORD_EXTRA_DELAY if is_word else 0.0)
         time.sleep(delay)
         if self.config.restore_clipboard:
             restore_if_ours()
-        return InsertionResult("dispatched")
+        return InsertionResult("dispatched", dispatched_ns=dispatched_ns)
